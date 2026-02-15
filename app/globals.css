@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: #030303;
+  --color-foreground: #ededed;
+  --color-surface: #080808;
+  --color-muted: #888888;
+  --color-dim: #555555;
+  --color-subtle: #171717;
+  --color-gold: #c0a36e;
+  --font-heading: var(--font-instrument-serif);
+  --font-body: var(--font-dm-sans);
+}
+
+html {
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: #1a1a1a #030303;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+::selection {
+  background-color: rgba(192, 163, 110, 0.3);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #030303;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1a1a1a;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a2a;
+}
+
+/* Hero animated grid background */
+.hero-grid {
+  background-size: 60px 60px;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  mask-image: radial-gradient(
+    ellipse 80% 50% at 50% 0%,
+    rgba(0, 0, 0, 0.6),
+    transparent
+  );
+  -webkit-mask-image: radial-gradient(
+    ellipse 80% 50% at 50% 0%,
+    rgba(0, 0, 0, 0.6),
+    transparent
+  );
+}
+
+/* Warm glow behind hero content */
+.hero-glow {
+  background: radial-gradient(
+    ellipse 50% 80% at 50% 20%,
+    rgba(192, 163, 110, 0.05),
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* Section divider line */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #171717 50%, transparent);
+}
+
+/* Gradient text for the hero name */
+.name-gradient {
+  background: linear-gradient(180deg, #ffffff 0%, #d4cbbf 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Subtle glow on project cards */
+.card-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(192, 163, 110, 0.04),
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+.group:hover .card-glow {
+  opacity: 1;
+}
+
+/* Browser window dots */
+.window-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
