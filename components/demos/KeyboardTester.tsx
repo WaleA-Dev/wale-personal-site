@@ -19,6 +19,8 @@ const KEY_CODE_MAP: Record<string, string> = {
 
 const MICRO_RELEASE_MS = 20;
 
+// --- Types ---
+
 interface KeyEvent {
   key: string;
   code: string;
@@ -28,6 +30,11 @@ interface KeyEvent {
   hz: string;
   elapsed: string;
   extra: string;
+  timestampMs: number;
+  elapsedMs: number;
+  intervalMs: number | null;
+  holdMs: number | null;
+  reactivationMs: number | null;
 }
 
 interface InternalStats {
@@ -45,6 +52,23 @@ interface InternalStats {
   microReleases: number;
   holdDurations: number[];
   keyDownTimes: Record<string, number>;
+  keyUpTimes: Record<string, number>;
+  reactivationGaps: number[];
+  sameKeyTapIntervals: number[];
+  lastKeydownPerKey: Record<string, number>;
+}
+
+interface ClassSignal {
+  name: string;
+  finding: string;
+  supports: "rapid_trigger" | "magnetic" | "mechanical" | "neutral";
+}
+
+interface Classification {
+  verdict: string;
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  description: string;
+  signals: ClassSignal[];
 }
 
 interface DisplayStats {
@@ -63,28 +87,186 @@ interface DisplayStats {
   microReleases: number;
   avgHold: number;
   minHold: number;
-  switchScore: number;
+  holdP5: number;
+  holdP25: number;
+  holdP50: number;
+  holdP75: number;
+  holdP95: number;
+  holdStdDev: number;
+  reactP5: number;
+  reactMedian: number;
+  reactMin: number;
+  maxTapRate: number;
+  microRatio: number;
+  classification: Classification;
   keydownIntervals: number[];
 }
 
+// --- Helpers ---
+
 function createFreshStats(): InternalStats {
   return {
-    keydownIntervals: [],
-    allIntervals: [],
-    lastKeydownTime: null,
-    lastEventTime: null,
-    totalEvents: 0,
-    totalKeydowns: 0,
-    totalKeyups: 0,
-    nkroMax: 0,
-    heldKeys: new Set(),
-    testedKeys: new Set(),
-    ghostEvents: 0,
-    microReleases: 0,
-    holdDurations: [],
-    keyDownTimes: {},
+    keydownIntervals: [], allIntervals: [],
+    lastKeydownTime: null, lastEventTime: null,
+    totalEvents: 0, totalKeydowns: 0, totalKeyups: 0,
+    nkroMax: 0, heldKeys: new Set(), testedKeys: new Set(),
+    ghostEvents: 0, microReleases: 0,
+    holdDurations: [], keyDownTimes: {},
+    keyUpTimes: {}, reactivationGaps: [],
+    sameKeyTapIntervals: [], lastKeydownPerKey: {},
   };
 }
+
+function pctSorted(sorted: number[], p: number): number {
+  if (sorted.length === 0) return NaN;
+  const idx = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (idx - lo) * (sorted[hi] - sorted[lo]);
+}
+
+function classifySwitch(m: {
+  holdP5: number; holdMean: number; holdStdDev: number;
+  reactP5: number; reactMin: number;
+  microRatio: number; maxTapRate: number;
+  ghostEvents: number; totalEvents: number; totalKeyups: number;
+  holdCount: number; reactCount: number;
+}): Classification {
+  if (m.totalEvents < 50) {
+    return {
+      verdict: "NEED MORE DATA",
+      confidence: "LOW",
+      description: "Generate at least 50 key events by rapidly tapping a single key for 10 seconds.",
+      signals: [],
+    };
+  }
+
+  const signals: ClassSignal[] = [];
+
+  // Signal 1: Hold duration floor (5th percentile)
+  // Mechanical switches need ~2mm travel + debounce → floor typically >30ms
+  // Magnetic rapid trigger at 0.1mm actuation → sub-8ms holds achievable
+  if (m.holdCount >= 10) {
+    const p5 = m.holdP5;
+    if (!isNaN(p5)) {
+      if (p5 < 8) {
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — sub-8ms holds are physically impossible on mechanical switches (require ~2mm travel + debounce)`, supports: "rapid_trigger" });
+      } else if (p5 < 15) {
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — very short holds, below typical mechanical floor (~30ms), consistent with magnetic switches`, supports: "magnetic" });
+      } else if (p5 < 25) {
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — borderline short holds, could be fast typing on mechanical or magnetic switches`, supports: "neutral" });
+      } else if (p5 < 40) {
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — consistent with mechanical switch travel distance and firmware debounce`, supports: "mechanical" });
+      } else {
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — long hold floor, typical of mechanical or membrane switches`, supports: "mechanical" });
+      }
+    }
+  }
+
+  // Signal 2: Same-key re-activation speed (keyup → next keydown of same key)
+  // Mechanical: key must travel ~0.4mm up past reset point then ~2mm down → >25ms
+  // Rapid trigger: reset at 0.1mm, actuation at 0.1mm → near-instant
+  if (m.reactCount >= 5) {
+    const rp5 = m.reactP5;
+    if (!isNaN(rp5)) {
+      if (rp5 < 8) {
+        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — near-instant same-key re-activation, hallmark of rapid trigger (0.1mm reset distance)`, supports: "rapid_trigger" });
+      } else if (rp5 < 20) {
+        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — fast re-activation, below mechanical reset travel time`, supports: "magnetic" });
+      } else if (rp5 < 35) {
+        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — moderate re-activation speed`, supports: "neutral" });
+      } else {
+        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — consistent with full mechanical key reset travel (~0.4mm hysteresis)`, supports: "mechanical" });
+      }
+    }
+  }
+
+  // Signal 3: Micro-release ratio (% of holds under 20ms)
+  if (m.totalKeyups >= 20) {
+    if (m.microRatio > 0.2) {
+      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% of holds were <20ms — high rate of ultra-short holds, strong rapid trigger indicator`, supports: "rapid_trigger" });
+    } else if (m.microRatio > 0.05) {
+      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% micro-releases — some very short holds detected`, supports: "magnetic" });
+    } else if (m.microRatio < 0.01 && m.totalKeyups >= 50) {
+      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% — virtually no sub-20ms holds, consistent with mechanical travel constraints`, supports: "mechanical" });
+    }
+  }
+
+  // Signal 4: Maximum single-key tap rate
+  // Human physical limit on mechanical: ~15-20 taps/sec (need full travel cycle)
+  // Rapid trigger: 25-50+ taps/sec (minimal travel)
+  if (m.maxTapRate > 0) {
+    if (m.maxTapRate > 30) {
+      signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — exceeds human mechanical limit (~20/sec), indicates rapid trigger`, supports: "rapid_trigger" });
+    } else if (m.maxTapRate > 18) {
+      signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — very fast, at the edge of what's possible on mechanical`, supports: "magnetic" });
+    } else if (m.maxTapRate > 5) {
+      signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — within normal range for mechanical switches`, supports: "neutral" });
+    }
+  }
+
+  // Signal 5: Hold duration consistency
+  // Analog sensing = clean, uniform timing; contact-based = noisier from bounce/debounce
+  if (m.holdCount >= 20 && m.holdMean > 0) {
+    const cv = m.holdStdDev / m.holdMean;
+    if (cv < 0.2 && m.holdMean < 40) {
+      signals.push({ name: "Hold Consistency", finding: `CV = ${cv.toFixed(2)} (mean ${m.holdMean.toFixed(0)}ms) — very uniform short holds, typical of analog hall-effect sensing`, supports: "magnetic" });
+    } else if (cv > 0.5) {
+      signals.push({ name: "Hold Consistency", finding: `CV = ${cv.toFixed(2)} — high variance in hold durations, can indicate debounce timing artifacts`, supports: "mechanical" });
+    }
+  }
+
+  // Signal 6: Ghost/bounce events
+  if (m.totalEvents >= 100) {
+    if (m.ghostEvents > 3) {
+      signals.push({ name: "Contact Bounce", finding: `${m.ghostEvents} ghost events — repeated keydown without keyup, characteristic of contact-based switch bounce`, supports: "mechanical" });
+    } else if (m.ghostEvents === 0) {
+      signals.push({ name: "Contact Bounce", finding: `0 ghost events — clean signaling, consistent with analog (non-contact) sensing`, supports: "magnetic" });
+    }
+  }
+
+  // Tally weighted scores
+  let rt = 0, mag = 0, mech = 0;
+  for (const sig of signals) {
+    switch (sig.supports) {
+      case "rapid_trigger": rt += 1.0; mag += 0.3; break;
+      case "magnetic": mag += 1.0; break;
+      case "mechanical": mech += 1.0; break;
+    }
+  }
+
+  const total = rt + mag + mech;
+  if (total === 0 || signals.length < 2) {
+    return { verdict: "INCONCLUSIVE", confidence: "LOW", description: "Not enough distinguishing signals. Rapidly tap a single key for 10+ seconds to generate more data.", signals };
+  }
+
+  const maxScore = Math.max(rt, mag, mech);
+  const dominance = maxScore / total;
+  const dataRich = m.totalEvents >= 100 && m.holdCount >= 30;
+  const conf: "HIGH" | "MEDIUM" | "LOW" = dominance > 0.55 && dataRich ? "HIGH" : dominance > 0.4 ? "MEDIUM" : "LOW";
+
+  if (rt >= mag && rt >= mech) {
+    return { verdict: "RAPID TRIGGER", confidence: conf, description: "Magnetic/Hall effect switches with rapid trigger enabled. Ultra-short holds and near-instant re-activation detected — impossible on mechanical switches.", signals };
+  } else if (mag >= mech) {
+    return { verdict: "LIKELY MAGNETIC", confidence: conf, description: "Characteristics consistent with magnetic/Hall effect switches. Clean timing with short hold durations and no contact bounce artifacts.", signals };
+  } else {
+    return { verdict: "LIKELY MECHANICAL", confidence: conf, description: "Characteristics consistent with traditional mechanical switches. Hold patterns match physical key travel distance and firmware debounce behavior.", signals };
+  }
+}
+
+const VERDICT_COLORS: Record<string, string> = {
+  "RAPID TRIGGER": "#ff44cc",
+  "LIKELY MAGNETIC": "#44aaff",
+  "LIKELY MECHANICAL": "#ffaa44",
+  "INCONCLUSIVE": "#888888",
+  "NEED MORE DATA": "#555555",
+};
+const SIGNAL_COLORS: Record<string, string> = {
+  rapid_trigger: "#ff44cc", magnetic: "#44aaff", mechanical: "#ffaa44", neutral: "#555555",
+};
+
+// --- Component ---
 
 export default function KeyboardTester() {
   const [events, setEvents] = useState<KeyEvent[]>([]);
@@ -98,66 +280,47 @@ export default function KeyboardTester() {
   const getStats = useCallback((): DisplayStats => {
     const s = statsRef.current;
 
-    // Use keydown-only intervals for rate metrics (excludes auto-repeat and keyup events)
     const kdIntervals = s.keydownIntervals;
     const rates = kdIntervals.filter(i => i > 0).map(i => 1000 / i);
     const avgRate = rates.length > 0 ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
     const peakRate = rates.length > 0 ? Math.max(...rates) : 0;
     const minInterval = kdIntervals.length > 0 ? Math.min(...kdIntervals) : Infinity;
     const maxInterval = kdIntervals.length > 0 ? Math.max(...kdIntervals) : 0;
-    const mean = kdIntervals.length > 0 ? kdIntervals.reduce((a, b) => a + b, 0) / kdIntervals.length : 0;
-    const variance = kdIntervals.length > 0 ? kdIntervals.reduce((a, b) => a + (b - mean) ** 2, 0) / kdIntervals.length : 0;
-    const jitter = Math.sqrt(variance);
+    const kdMean = kdIntervals.length > 0 ? kdIntervals.reduce((a, b) => a + b, 0) / kdIntervals.length : 0;
+    const kdVar = kdIntervals.length > 0 ? kdIntervals.reduce((a, b) => a + (b - kdMean) ** 2, 0) / kdIntervals.length : 0;
+    const jitter = Math.sqrt(kdVar);
 
     const holds = s.holdDurations;
     const avgHold = holds.length > 0 ? holds.reduce((a, b) => a + b, 0) / holds.length : 0;
     const minHold = holds.length > 0 ? Math.min(...holds) : Infinity;
+    const sortedHolds = [...holds].sort((a, b) => a - b);
+    const holdP5 = pctSorted(sortedHolds, 5);
+    const holdP25 = pctSorted(sortedHolds, 25);
+    const holdP50 = pctSorted(sortedHolds, 50);
+    const holdP75 = pctSorted(sortedHolds, 75);
+    const holdP95 = pctSorted(sortedHolds, 95);
+    const holdVar = holds.length > 0 ? holds.reduce((a, b) => a + (b - avgHold) ** 2, 0) / holds.length : 0;
+    const holdStdDev = Math.sqrt(holdVar);
 
-    // --- Principled switch-type scoring ---
-    // Scores how likely the keyboard uses magnetic/Hall effect switches vs mechanical.
-    // Based on physical constraints: mechanical switches require ~2mm travel + debounce,
-    // magnetic switches can actuate at 0.1mm with no debounce.
-    let score = 0;
+    const sortedReact = [...s.reactivationGaps].sort((a, b) => a - b);
+    const reactP5 = pctSorted(sortedReact, 5);
+    const reactMedian = pctSorted(sortedReact, 50);
+    const reactMin = sortedReact.length > 0 ? sortedReact[0] : Infinity;
 
-    // Factor 1 (0-30): Minimum hold time
-    // Mechanical min hold is typically >30ms; magnetic rapid trigger can produce <10ms
-    if (minHold < 5) score += 30;
-    else if (minHold < 10) score += 22;
-    else if (minHold < 20) score += 12;
-    else if (minHold < 30) score += 5;
+    const sortedTaps = [...s.sameKeyTapIntervals].sort((a, b) => a - b);
+    const tapP5 = pctSorted(sortedTaps, 5);
+    const maxTapRate = !isNaN(tapP5) && tapP5 > 0 ? 1000 / tapP5 : 0;
 
-    // Factor 2 (0-25): Proportion of micro-releases (<20ms holds)
     const microRatio = s.totalKeyups > 0 ? s.microReleases / s.totalKeyups : 0;
-    if (microRatio > 0.4) score += 25;
-    else if (microRatio > 0.25) score += 18;
-    else if (microRatio > 0.1) score += 10;
-    else if (microRatio > 0.03) score += 4;
 
-    // Factor 3 (0-25): Minimum keydown-to-keydown interval
-    // Rapid trigger allows re-actuation without full key release
-    if (minInterval < 3) score += 25;
-    else if (minInterval < 8) score += 18;
-    else if (minInterval < 15) score += 10;
-    else if (minInterval < 25) score += 4;
-
-    // Factor 4 (0-20): Consistency of short hold durations
-    // Analog sensing produces uniform short holds; mechanical bounce is noisier
-    const shortHolds = holds.filter(h => h < 50);
-    if (shortHolds.length >= 5) {
-      const holdMean = shortHolds.reduce((a, b) => a + b, 0) / shortHolds.length;
-      const holdVar = shortHolds.reduce((a, b) => a + (b - holdMean) ** 2, 0) / shortHolds.length;
-      const holdStdDev = Math.sqrt(holdVar);
-      if (holdStdDev < 3 && holdMean < 20) score += 20;
-      else if (holdStdDev < 8 && holdMean < 30) score += 12;
-      else if (holdStdDev < 15 && holdMean < 50) score += 5;
-    }
-
-    // Data sufficiency cap — prevent confident verdicts with insufficient data
-    if (s.totalEvents < 15) score = Math.min(score, 10);
-    else if (s.totalEvents < 30) score = Math.min(score, 30);
-    else if (s.totalEvents < 60) score = Math.min(score, 60);
-
-    score = Math.min(100, Math.max(0, score));
+    const classification = classifySwitch({
+      holdP5, holdMean: avgHold, holdStdDev,
+      reactP5, reactMin,
+      microRatio, maxTapRate,
+      ghostEvents: s.ghostEvents,
+      totalEvents: s.totalEvents, totalKeyups: s.totalKeyups,
+      holdCount: holds.length, reactCount: s.reactivationGaps.length,
+    });
 
     return {
       avgRate, peakRate, minInterval, maxInterval, jitter,
@@ -165,7 +328,11 @@ export default function KeyboardTester() {
       totalKeyups: s.totalKeyups, nkroMax: s.nkroMax,
       currentHeld: s.heldKeys.size, testedCount: s.testedKeys.size,
       ghostEvents: s.ghostEvents, microReleases: s.microReleases,
-      avgHold, minHold, switchScore: score,
+      avgHold, minHold,
+      holdP5, holdP25, holdP50, holdP75, holdP95, holdStdDev,
+      reactP5, reactMedian, reactMin,
+      maxTapRate, microRatio,
+      classification,
       keydownIntervals: [...s.keydownIntervals.slice(-100)],
     };
   }, []);
@@ -195,8 +362,9 @@ export default function KeyboardTester() {
         s.allIntervals = [...s.allIntervals.slice(-499), allInterval];
       }
 
-      // Only track physical keypresses for interval/rate metrics (skip auto-repeat)
       let kdInterval: number | null = null;
+      let reactivationGap: number | null = null;
+
       if (!e.repeat) {
         kdInterval = s.lastKeydownTime !== null ? (now - s.lastKeydownTime) : null;
         s.lastKeydownTime = now;
@@ -206,10 +374,22 @@ export default function KeyboardTester() {
           s.keydownIntervals = [...s.keydownIntervals.slice(-499), kdInterval];
         }
 
-        // Ghost: keydown fires for a key already in heldKeys without a keyup in between
-        if (s.heldKeys.has(key)) s.ghostEvents++;
+        // Same-key re-activation gap: time since this key was last released
+        const lastUp = s.keyUpTimes[key];
+        if (lastUp !== undefined) {
+          reactivationGap = now - lastUp;
+          s.reactivationGaps = [...s.reactivationGaps.slice(-299), reactivationGap];
+        }
 
-        // Record press timestamp (only on physical press, not repeat) for hold duration
+        // Same-key tap interval: keydown-to-keydown of same key
+        const lastDown = s.lastKeydownPerKey[key];
+        if (lastDown !== undefined) {
+          const tapInterval = now - lastDown;
+          s.sameKeyTapIntervals = [...s.sameKeyTapIntervals.slice(-299), tapInterval];
+        }
+        s.lastKeydownPerKey[key] = now;
+
+        if (s.heldKeys.has(key)) s.ghostEvents++;
         s.keyDownTimes[key] = now;
       }
 
@@ -217,15 +397,16 @@ export default function KeyboardTester() {
       s.nkroMax = Math.max(s.nkroMax, s.heldKeys.size);
       s.testedKeys.add(key);
 
+      const elapsedMs = now - startRef.current;
       addEvent({
-        key,
-        code: e.code,
-        type: "DOWN",
-        repeat: e.repeat,
+        key, code: e.code, type: "DOWN", repeat: e.repeat,
         interval: allInterval !== null ? allInterval.toFixed(3) : "—",
         hz: allInterval !== null && allInterval > 0 ? (1000 / allInterval).toFixed(1) : "—",
-        elapsed: ((now - startRef.current) / 1000).toFixed(3),
-        extra: e.repeat ? "REPEAT" : "",
+        elapsed: (elapsedMs / 1000).toFixed(3),
+        extra: e.repeat ? "REPEAT" : reactivationGap !== null ? `react: ${reactivationGap.toFixed(1)}ms` : "",
+        timestampMs: now, elapsedMs,
+        intervalMs: allInterval, holdMs: null,
+        reactivationMs: reactivationGap,
       });
     };
 
@@ -248,22 +429,24 @@ export default function KeyboardTester() {
       let holdDuration: number | null = null;
       if (downTime !== undefined) {
         holdDuration = now - downTime;
-        s.holdDurations = [...s.holdDurations.slice(-199), holdDuration];
+        s.holdDurations = [...s.holdDurations.slice(-299), holdDuration];
         if (holdDuration < MICRO_RELEASE_MS) s.microReleases++;
         delete s.keyDownTimes[key];
       }
 
+      s.keyUpTimes[key] = now;
       s.heldKeys.delete(key);
 
+      const elapsedMs = now - startRef.current;
       addEvent({
-        key,
-        code: e.code,
-        type: "UP",
-        repeat: false,
+        key, code: e.code, type: "UP", repeat: false,
         interval: allInterval !== null ? allInterval.toFixed(3) : "—",
         hz: allInterval !== null && allInterval > 0 ? (1000 / allInterval).toFixed(1) : "—",
-        elapsed: ((now - startRef.current) / 1000).toFixed(3),
+        elapsed: (elapsedMs / 1000).toFixed(3),
         extra: holdDuration !== null ? `hold: ${holdDuration.toFixed(1)}ms` : "",
+        timestampMs: now, elapsedMs,
+        intervalMs: allInterval, holdMs: holdDuration,
+        reactivationMs: null,
       });
     };
 
@@ -289,39 +472,75 @@ export default function KeyboardTester() {
     setIsRecording(true);
   };
 
-  const ds = displayStats;
-  const rateColor = ds.avgRate > 30 ? "#00ff88" : ds.avgRate > 15 ? "#88ff00" : ds.avgRate > 5 ? "#c0c8d0" : "#5a6068";
-  const scoreColor = ds.switchScore > 55 ? "#00ff88" : ds.switchScore > 35 ? "#ffaa00" : "#ff5555";
-  const scoreVerdict = ds.totalEvents < 30
-    ? "NEED MORE DATA"
-    : ds.switchScore > 75 ? "LIKELY MAGNETIC / HALL EFFECT"
-    : ds.switchScore > 55 ? "POSSIBLY MAGNETIC"
-    : ds.switchScore > 35 ? "INCONCLUSIVE"
-    : "LIKELY MECHANICAL";
+  const downloadReport = () => {
+    const ds = displayStats;
+    const report = {
+      version: "1.0",
+      exportedAt: new Date().toISOString(),
+      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "unknown",
+      testDurationSec: parseFloat(((performance.now() - startRef.current) / 1000).toFixed(1)),
+      analysis: {
+        verdict: ds.classification.verdict,
+        confidence: ds.classification.confidence,
+        description: ds.classification.description,
+        eventRate: { avgHz: +ds.avgRate.toFixed(2), peakHz: +ds.peakRate.toFixed(2), minIntervalMs: ds.minInterval < Infinity ? +ds.minInterval.toFixed(3) : null },
+        holdDuration: {
+          minMs: ds.minHold < Infinity ? +ds.minHold.toFixed(3) : null,
+          avgMs: +ds.avgHold.toFixed(2), stdDevMs: +ds.holdStdDev.toFixed(2),
+          p5: isNaN(ds.holdP5) ? null : +ds.holdP5.toFixed(2),
+          p25: isNaN(ds.holdP25) ? null : +ds.holdP25.toFixed(2),
+          p50: isNaN(ds.holdP50) ? null : +ds.holdP50.toFixed(2),
+          p75: isNaN(ds.holdP75) ? null : +ds.holdP75.toFixed(2),
+          p95: isNaN(ds.holdP95) ? null : +ds.holdP95.toFixed(2),
+        },
+        reactivation: {
+          minMs: ds.reactMin < Infinity ? +ds.reactMin.toFixed(2) : null,
+          p5: isNaN(ds.reactP5) ? null : +ds.reactP5.toFixed(2),
+          medianMs: isNaN(ds.reactMedian) ? null : +ds.reactMedian.toFixed(2),
+        },
+        maxTapRateHz: +ds.maxTapRate.toFixed(1),
+        microReleaseRatio: +ds.microRatio.toFixed(4),
+        nkroMax: ds.nkroMax, ghostEvents: ds.ghostEvents,
+        totalEvents: ds.totalEvents, totalKeydowns: ds.totalKeydowns, totalKeyups: ds.totalKeyups,
+        keysTestedCount: ds.testedCount,
+        signals: ds.classification.signals,
+      },
+      events: eventsRef.current.map(e => ({
+        elapsedMs: +e.elapsedMs.toFixed(3), type: e.type, key: e.key, code: e.code, repeat: e.repeat,
+        intervalMs: e.intervalMs !== null ? +e.intervalMs.toFixed(3) : null,
+        holdMs: e.holdMs !== null ? +e.holdMs.toFixed(3) : null,
+        reactivationMs: e.reactivationMs !== null ? +e.reactivationMs.toFixed(3) : null,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `keyboard-diag-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
+  const ds = displayStats;
+  const cl = ds.classification;
+  const verdictColor = VERDICT_COLORS[cl.verdict] || "#888";
+  const rateColor = ds.avgRate > 30 ? "#00ff88" : ds.avgRate > 15 ? "#88ff00" : ds.avgRate > 5 ? "#c0c8d0" : "#5a6068";
   const mono = "var(--font-mono, 'JetBrains Mono'), 'SF Mono', 'Fira Code', monospace";
 
-  const Stat = ({ label, value, sub, color, warn }: {
-    label: string; value: string | number; sub?: string;
-    color?: string; warn?: boolean;
-  }) => (
-    <div style={{
-      background: warn ? "#1a1215" : "#0c0e10",
-      border: `1px solid ${warn ? "#ff334433" : "#151a1e"}`,
-      borderRadius: 6, padding: "8px 6px", textAlign: "center",
-    }}>
-      <div style={{ fontSize: 8, letterSpacing: 2, color: warn ? "#ff5555" : "#3a4048", marginBottom: 3, textTransform: "uppercase" }}>{label}</div>
+  const Stat = ({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) => (
+    <div style={{ background: "#0c0e10", border: "1px solid #151a1e", borderRadius: 6, padding: "8px 6px", textAlign: "center" }}>
+      <div style={{ fontSize: 8, letterSpacing: 2, color: "#3a4048", marginBottom: 3, textTransform: "uppercase" }}>{label}</div>
       <div style={{ fontSize: 18, fontWeight: 700, color: color || "#00ff88", lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 8, color: warn ? "#ff555588" : "#2a3038", marginTop: 2 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 8, color: "#2a3038", marginTop: 2 }}>{sub}</div>}
     </div>
   );
 
+  const fmtP = (v: number) => isNaN(v) ? "—" : v < Infinity ? v.toFixed(1) : "—";
+
   return (
-    <div style={{
-      color: "#c0c8d0",
-      fontFamily: mono,
-      display: "flex", flexDirection: "column", alignItems: "center",
-    }}>
+    <div style={{ color: "#c0c8d0", fontFamily: mono, display: "flex", flexDirection: "column", alignItems: "center" }}>
       {/* Header */}
       <div style={{ textAlign: "center", marginBottom: 14 }}>
         <div style={{ fontSize: 9, letterSpacing: 8, color: "#2a3038" }}>ADVANCED</div>
@@ -344,37 +563,33 @@ export default function KeyboardTester() {
       </div>
 
       {/* Switch analysis */}
-      <div style={{
-        width: "100%", maxWidth: 820, marginBottom: 10, background: "#0c0e10",
-        border: "1px solid #151a1e", borderRadius: 8, padding: "10px 14px",
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+      <div style={{ width: "100%", maxWidth: 820, marginBottom: 10, background: "#0c0e10", border: "1px solid #151a1e", borderRadius: 8, padding: "12px 14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
           <div style={{ fontSize: 9, letterSpacing: 3, color: "#3a4048" }}>SWITCH TYPE ANALYSIS</div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: scoreColor, letterSpacing: 1 }}>{scoreVerdict}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 8, color: "#3a4048", border: `1px solid ${verdictColor}33`, borderRadius: 3, padding: "2px 6px", letterSpacing: 1 }}>{cl.confidence}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: verdictColor, letterSpacing: 1 }}>{cl.verdict}</span>
+          </div>
         </div>
-        <div style={{ height: 6, background: "#111418", borderRadius: 3, overflow: "hidden", marginBottom: 10 }}>
-          <div style={{
-            width: `${ds.switchScore}%`, height: "100%", borderRadius: 3, transition: "width 0.4s ease",
-            background: "linear-gradient(90deg, #ff5555, #ffaa00, #00ff88)",
-          }} />
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
+        <div style={{ fontSize: 8, color: "#3a4048", lineHeight: 1.5, marginBottom: 10 }}>{cl.description}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
           {[
-            { label: "CONFIDENCE", value: `${ds.switchScore}%`, color: scoreColor },
-            { label: "MICRO RELS", value: ds.microReleases, sub: `<${MICRO_RELEASE_MS}ms holds`, color: ds.microReleases > 3 ? "#ffaa00" : "#556" },
+            { label: "HOLD P5", value: fmtP(ds.holdP5), sub: "ms", color: ds.holdP5 < 10 ? "#ff44cc" : ds.holdP5 < 25 ? "#44aaff" : ds.holdP5 < 40 ? "#ffaa44" : "#c0c8d0" },
+            { label: "REACT P5", value: fmtP(ds.reactP5), sub: "ms", color: ds.reactP5 < 10 ? "#ff44cc" : ds.reactP5 < 25 ? "#44aaff" : "#c0c8d0" },
+            { label: "MICRO%", value: ds.totalKeyups > 0 ? `${(ds.microRatio * 100).toFixed(1)}` : "—", sub: `<${MICRO_RELEASE_MS}ms`, color: ds.microRatio > 0.2 ? "#ff44cc" : ds.microRatio > 0.05 ? "#44aaff" : "#556" },
+            { label: "TAP RATE", value: ds.maxTapRate > 0 ? ds.maxTapRate.toFixed(1) : "—", sub: "taps/sec", color: ds.maxTapRate > 30 ? "#ff44cc" : ds.maxTapRate > 18 ? "#44aaff" : "#c0c8d0" },
             { label: "AVG HOLD", value: ds.avgHold > 0 ? ds.avgHold.toFixed(1) : "—", sub: "ms", color: "#c0c8d0" },
-            { label: "MIN HOLD", value: ds.minHold < Infinity ? ds.minHold.toFixed(2) : "—", sub: "ms", color: ds.minHold < 15 ? "#ffaa00" : "#c0c8d0" },
-            { label: "GHOSTS", value: ds.ghostEvents, sub: "phantom evts", color: ds.ghostEvents > 0 ? "#ff5555" : "#556" },
+            { label: "GHOSTS", value: ds.ghostEvents, sub: "bounce evts", color: ds.ghostEvents > 3 ? "#ffaa44" : ds.ghostEvents > 0 ? "#ff5555" : "#556" },
           ].map((item, i) => (
             <div key={i} style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 8, color: "#3a4048", letterSpacing: 1 }}>{item.label}</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: item.color }}>{item.value}</div>
+              <div style={{ fontSize: 7, color: "#3a4048", letterSpacing: 1 }}>{item.label}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: item.color }}>{item.value}</div>
               {item.sub && <div style={{ fontSize: 7, color: "#2a3038" }}>{item.sub}</div>}
             </div>
           ))}
         </div>
         <div style={{ marginTop: 8, fontSize: 8, color: "#2a3038", lineHeight: 1.5 }}>
-          TIP: Rapidly tap a single key as fast as possible for 10 seconds. Magnetic/Hall effect keyboards produce ultra-short hold times (&lt;10ms) and allow rapid re-actuation. The score requires 30+ events for a meaningful verdict.
+          TIP: Rapidly tap a single key as fast as possible for 10+ seconds. The tool needs 50+ events for classification. Sub-10ms holds and near-instant re-activation are physically impossible on mechanical switches.
         </div>
       </div>
 
@@ -396,12 +611,16 @@ export default function KeyboardTester() {
           padding: "5px 12px", fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: "inherit",
           background: "#1a1215", color: "#ff5555", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600,
         }}>RESET</button>
+        <button onClick={downloadReport} style={{
+          padding: "5px 12px", fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: "inherit",
+          background: "#0f1520", color: "#5588ff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600,
+        }}>EXPORT</button>
       </div>
 
       {/* Content area */}
       <div ref={logRef} style={{
         background: "#0c0e10", border: "1px solid #151a1e", borderRadius: 8, padding: 10,
-        width: "100%", maxWidth: 820, height: 320, overflowY: "auto", overflowX: "auto",
+        width: "100%", maxWidth: 820, height: 400, overflowY: "auto", overflowX: "auto",
       }}>
         {tab === "event log" && (
           <div style={{ minWidth: 600 }}>
@@ -423,7 +642,7 @@ export default function KeyboardTester() {
                       {e.interval !== "—" ? `${e.interval}ms` : "—"}
                     </div>
                     <div style={{ color: parseFloat(e.hz) > 200 ? "#00ff88" : "#5a6068", padding: "2px 0" }}>
-                      {e.hz !== "—" ? `${e.hz}` : "—"}
+                      {e.hz !== "—" ? e.hz : "—"}
                     </div>
                     <div style={{ color: "#3a4048", padding: "2px 0", fontSize: 8 }}>{e.extra}</div>
                   </React.Fragment>
@@ -443,32 +662,81 @@ export default function KeyboardTester() {
                 <div>Avg event rate: <span style={{ color: rateColor, fontWeight: 700 }}>{ds.avgRate > 0 ? `${ds.avgRate.toFixed(2)} Hz` : "—"}</span></div>
                 <div>Peak event rate: <span style={{ color: "#c0c8d0", fontWeight: 600 }}>{ds.peakRate > 0 ? `${ds.peakRate.toFixed(2)} Hz` : "—"}</span></div>
                 <div>Min interval: <span style={{ color: "#c0c8d0" }}>{ds.minInterval < Infinity ? `${ds.minInterval.toFixed(3)} ms` : "—"}</span></div>
-                <div>Max interval: <span style={{ color: "#c0c8d0" }}>{ds.maxInterval > 0 ? `${ds.maxInterval.toFixed(3)} ms` : "—"}</span></div>
                 <div>Jitter (σ): <span style={{ color: ds.jitter < 15 ? "#00ff88" : "#ffaa00" }}>{ds.jitter > 0 ? `±${ds.jitter.toFixed(3)} ms` : "—"}</span></div>
                 <div>Total events: <span style={{ color: "#c0c8d0" }}>{ds.totalEvents}</span> <span style={{ color: "#3a4048", fontSize: 8 }}>({ds.totalKeydowns} presses, {ds.totalKeyups} releases)</span></div>
-                <div style={{ marginTop: 6, fontSize: 8, color: "#2a3038", lineHeight: 1.5 }}>
-                  Event rate measures keydown-to-keydown arrival speed in the browser — not the keyboard{"'"}s USB poll rate. Rapid single-key tapping produces the most meaningful data.
-                </div>
               </div>
               <div>
-                <div style={{ color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>SWITCH CHARACTERISTICS</div>
-                <div>Avg hold: <span style={{ color: "#c0c8d0" }}>{ds.avgHold > 0 ? `${ds.avgHold.toFixed(2)} ms` : "—"}</span></div>
-                <div>Min hold: <span style={{ color: ds.minHold < 15 ? "#ffaa00" : "#c0c8d0" }}>{ds.minHold < Infinity ? `${ds.minHold.toFixed(3)} ms` : "—"}</span></div>
-                <div>Micro-releases: <span style={{ color: ds.microReleases > 3 ? "#ffaa00" : "#c0c8d0" }}>{ds.microReleases}</span> <span style={{ color: "#3a4048", fontSize: 8 }}>{`(<${MICRO_RELEASE_MS}ms holds)`}</span></div>
-                <div>Ghost events: <span style={{ color: ds.ghostEvents > 0 ? "#ff5555" : "#c0c8d0" }}>{ds.ghostEvents}</span></div>
-                <div>Keys tested: <span style={{ color: "#c0c8d0" }}>{ds.testedCount}</span></div>
-                <div>NKRO max: <span style={{ color: "#c0c8d0" }}>{ds.nkroMax}</span></div>
-                <div style={{ marginTop: 6, fontSize: 8, color: "#2a3038", lineHeight: 1.5 }}>
-                  Mechanical switches: min hold typically {">"} 30ms (physical travel + debounce). Magnetic/Hall effect: can produce {"<"} 10ms holds with rapid trigger enabled.
-                </div>
+                <div style={{ color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>HOLD DURATION DISTRIBUTION</div>
+                {ds.totalKeyups > 0 ? (
+                  <div style={{ fontSize: 9 }}>
+                    {[
+                      { label: "P5", val: ds.holdP5 },
+                      { label: "P25", val: ds.holdP25 },
+                      { label: "P50", val: ds.holdP50 },
+                      { label: "P75", val: ds.holdP75 },
+                      { label: "P95", val: ds.holdP95 },
+                    ].map(({ label, val }) => {
+                      const w = !isNaN(val) && ds.holdP95 > 0 ? Math.min(100, (val / ds.holdP95) * 100) : 0;
+                      const c = val < 10 ? "#ff44cc" : val < 25 ? "#44aaff" : val < 40 ? "#ffaa44" : "#3a4048";
+                      return (
+                        <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                          <span style={{ width: 24, textAlign: "right", color: "#3a4048", fontSize: 8 }}>{label}</span>
+                          <div style={{ flex: 1, height: 6, background: "#111418", borderRadius: 3, overflow: "hidden" }}>
+                            <div style={{ width: `${w}%`, height: "100%", background: c, borderRadius: 3, transition: "width 0.3s" }} />
+                          </div>
+                          <span style={{ width: 50, fontSize: 8, color: c, fontWeight: 600 }}>{fmtP(val)}ms</span>
+                        </div>
+                      );
+                    })}
+                    <div style={{ fontSize: 8, color: "#2a3038", marginTop: 2 }}>
+                      σ = {ds.holdStdDev > 0 ? ds.holdStdDev.toFixed(1) : "—"}ms &nbsp; avg = {ds.avgHold > 0 ? ds.avgHold.toFixed(1) : "—"}ms
+                    </div>
+                  </div>
+                ) : <div style={{ color: "#1a1e22", fontSize: 9 }}>Press and release keys to see distribution...</div>}
               </div>
             </div>
+
+            {/* Re-activation analysis */}
+            <div style={{ marginTop: 12, color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>RE-ACTIVATION ANALYSIS</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 10 }}>
+              <div>
+                <div>Re-activation P5: <span style={{ color: ds.reactP5 < 10 ? "#ff44cc" : ds.reactP5 < 25 ? "#44aaff" : "#c0c8d0", fontWeight: 600 }}>{fmtP(ds.reactP5)} ms</span></div>
+                <div>Re-activation median: <span style={{ color: "#c0c8d0" }}>{fmtP(ds.reactMedian)} ms</span></div>
+                <div>Re-activation min: <span style={{ color: "#c0c8d0" }}>{ds.reactMin < Infinity ? ds.reactMin.toFixed(2) : "—"} ms</span></div>
+              </div>
+              <div>
+                <div>Max tap rate: <span style={{ color: ds.maxTapRate > 30 ? "#ff44cc" : ds.maxTapRate > 18 ? "#44aaff" : "#c0c8d0", fontWeight: 600 }}>{ds.maxTapRate > 0 ? `${ds.maxTapRate.toFixed(1)} taps/sec` : "—"}</span></div>
+                <div>Micro-releases: <span style={{ color: ds.microReleases > 3 ? "#ffaa00" : "#c0c8d0" }}>{ds.microReleases}</span> <span style={{ color: "#3a4048", fontSize: 8 }}>({(ds.microRatio * 100).toFixed(1)}% of releases)</span></div>
+                <div>Ghost events: <span style={{ color: ds.ghostEvents > 0 ? "#ff5555" : "#c0c8d0" }}>{ds.ghostEvents}</span></div>
+              </div>
+            </div>
+            <div style={{ fontSize: 8, color: "#2a3038", marginTop: 2, lineHeight: 1.5 }}>
+              Re-activation = time from releasing a key to pressing the same key again. Mechanical keyboards need {">"}25ms (physical reset travel). Rapid trigger can re-actuate in {"<"}5ms.
+            </div>
+
+            {/* Classification evidence */}
+            {cl.signals.length > 0 && (
+              <>
+                <div style={{ marginTop: 12, color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 6 }}>CLASSIFICATION EVIDENCE</div>
+                {cl.signals.map((sig, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 4, fontSize: 9, lineHeight: 1.5 }}>
+                    <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 3, background: SIGNAL_COLORS[sig.supports], marginTop: 4, flexShrink: 0 }} />
+                    <div>
+                      <span style={{ color: SIGNAL_COLORS[sig.supports], fontWeight: 600 }}>{sig.name}</span>
+                      <span style={{ color: "#3a4048" }}> — {sig.finding}</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* How to test */}
             <div style={{ marginTop: 12, color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>HOW TO TEST</div>
             <div style={{ fontSize: 9, color: "#3a4048", lineHeight: 1.7 }}>
-              1. Tap a single key as fast as possible for 10 sec — measures event rate + minimum hold time<br />
+              1. Tap a single key as fast as possible for 10+ sec — measures hold floor, re-activation speed, and tap rate<br />
               2. Press and hold 6+ keys simultaneously — tests N-key rollover (NKRO)<br />
-              3. Tap rapidly with minimal finger travel — magnetic switches produce sub-10ms holds<br />
-              4. Watch ghost events during rapid use — indicates switch double-firing or contact bounce
+              3. Focus on minimal finger movement during rapid tapping — rapid trigger keyboards show sub-10ms holds<br />
+              4. Use EXPORT to download the full report as JSON for external analysis
             </div>
           </div>
         )}
@@ -522,7 +790,7 @@ export default function KeyboardTester() {
 
       {/* Disclaimer */}
       <div style={{ marginTop: 8, fontSize: 8, color: "#1a1e22", textAlign: "center", maxWidth: 820, lineHeight: 1.5 }}>
-        Browser event timing is limited to ~1-4ms resolution. Switch type detection uses behavioral heuristics from key event patterns, not direct hardware access. For definitive results, use native USB protocol analysis tools.
+        Browser event timing is limited to ~1-4ms resolution. Classification uses behavioral heuristics from key event patterns, not direct hardware access. For definitive results, use native USB protocol analysis. Export your data with EXPORT for detailed offline analysis.
       </div>
     </div>
   );
