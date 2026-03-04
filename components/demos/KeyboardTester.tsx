@@ -563,31 +563,50 @@ export default function KeyboardTester() {
   const mono = "var(--font-mono, 'JetBrains Mono'), 'SF Mono', 'Fira Code', monospace";
 
   const Stat = ({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) => (
-    <div style={{ background: "#0c0e10", border: "1px solid #151a1e", borderRadius: 6, padding: "8px 6px", textAlign: "center" }}>
-      <div style={{ fontSize: 8, letterSpacing: 2, color: "#3a4048", marginBottom: 3, textTransform: "uppercase" }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 700, color: color || "#00ff88", lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 8, color: "#4a5058", marginTop: 2 }}>{sub}</div>}
+    <div style={{ background: "#09090b", border: "1px solid #18181b", borderRadius: 10, padding: "14px 10px", textAlign: "center" }}>
+      <div style={{ fontSize: 10, letterSpacing: 1.5, color: "#52525b", marginBottom: 6, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: color || "#00ff88", lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 9, color: "#52525b", marginTop: 5 }}>{sub}</div>}
     </div>
   );
 
   const fmtP = (v: number) => isNaN(v) ? "—" : v < Infinity ? v.toFixed(1) : "—";
 
+  const tabStyle = (t: string) => ({
+    padding: "8px 18px", fontSize: 11, letterSpacing: 0.5, fontFamily: "inherit",
+    background: tab === t ? "#18181b" : "transparent",
+    color: tab === t ? "#fafafa" : "#52525b",
+    border: "none", borderRadius: 8, cursor: "pointer" as const, fontWeight: 500,
+    transition: "all 0.2s ease",
+  });
+
+  const actionBtn = (bg: string, fg: string) => ({
+    padding: "7px 14px", fontSize: 10, fontFamily: "inherit", letterSpacing: 0.5,
+    background: bg, color: fg,
+    border: `1px solid ${fg}20`, borderRadius: 8, cursor: "pointer" as const, fontWeight: 500,
+    transition: "all 0.2s ease",
+  });
+
   return (
-    <div style={{ color: "#c0c8d0", fontFamily: mono, display: "flex", flexDirection: "column", alignItems: "center" }}>
+    <div style={{ color: "#d4d4d8", fontFamily: mono, display: "flex", flexDirection: "column", alignItems: "center" }}>
       {/* Header */}
-      <div style={{ textAlign: "center", marginBottom: 14 }}>
-        <div style={{ fontSize: 9, letterSpacing: 8, color: "#2a3038" }}>ADVANCED</div>
-        <h1 style={{ fontSize: 22, fontWeight: 800, color: "#00ff88", letterSpacing: -0.5, margin: "2px 0" }}>KEY DIAGNOSTICS</h1>
-        <div style={{ display: "flex", gap: 14, justifyContent: "center", fontSize: 12, color: "#5a6068", flexWrap: "wrap", alignItems: "center" }}>
-          <span>EVENTS: {ds.totalEvents}</span>
-          <span>PHYSICAL: {ds.totalKeydowns}</span>
-          <span style={{ color: isRecording ? "#00ff88" : "#ff5555", animation: isRecording ? "blink 1.5s infinite" : "none" }}>
-            {isRecording ? "● RECORDING" : "○ PAUSED"}
+      <div style={{ textAlign: "center", marginBottom: 20 }}>
+        <div style={{ fontSize: 10, letterSpacing: 6, color: "#3f3f46", marginBottom: 4 }}>ADVANCED</div>
+        <h1 style={{ fontSize: 26, fontWeight: 800, color: "#00ff88", letterSpacing: -0.5, margin: "4px 0 10px" }}>KEY DIAGNOSTICS</h1>
+        <div style={{ display: "flex", gap: 16, justifyContent: "center", fontSize: 12, color: "#71717a", flexWrap: "wrap", alignItems: "center" }}>
+          <span>{ds.totalEvents} events</span>
+          <span>{ds.totalKeydowns} presses</span>
+          <span style={{ color: isRecording ? "#00ff88" : "#ef4444", animation: isRecording ? "blink 1.5s infinite" : "none" }}>
+            {isRecording ? "● Recording" : "○ Paused"}
           </span>
+        </div>
+        {/* Live verdict badge */}
+        <div style={{ marginTop: 10 }}>
           <span style={{
-            color: verdictColor, fontWeight: 700, fontSize: 11, letterSpacing: 1,
-            border: `1px solid ${verdictColor}44`, borderRadius: 4, padding: "3px 10px",
-            transition: "all 0.3s ease",
+            color: verdictColor, fontWeight: 600, fontSize: 12, letterSpacing: 0.5,
+            background: `${verdictColor}12`, border: `1px solid ${verdictColor}30`,
+            borderRadius: 20, padding: "5px 16px",
+            transition: "all 0.4s ease",
           }}>
             {cl.verdict}
           </span>
@@ -595,120 +614,115 @@ export default function KeyboardTester() {
       </div>
 
       {/* Top stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, width: "100%", maxWidth: 820, marginBottom: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, width: "100%", maxWidth: 820, marginBottom: 14 }}>
         <Stat label="Event Rate" value={ds.avgRate > 0 ? `${ds.avgRate.toFixed(0)}Hz` : "—"} sub={`peak ${ds.peakRate > 0 ? ds.peakRate.toFixed(0) + "Hz" : "—"}`} color={rateColor} />
-        <Stat label="Min Interval" value={ds.minInterval < Infinity ? `${ds.minInterval.toFixed(2)}ms` : "—"} sub={`max ${ds.maxInterval > 0 ? ds.maxInterval.toFixed(1) + "ms" : "—"}`} color="#c0c8d0" />
+        <Stat label="Min Interval" value={ds.minInterval < Infinity ? `${ds.minInterval.toFixed(2)}ms` : "—"} sub={`max ${ds.maxInterval > 0 ? ds.maxInterval.toFixed(1) + "ms" : "—"}`} color="#d4d4d8" />
         <Stat label="Jitter" value={ds.jitter > 0 ? `±${ds.jitter.toFixed(2)}ms` : "—"} sub="std deviation" color={ds.jitter < 15 ? "#00ff88" : ds.jitter < 50 ? "#ffaa00" : "#ff5555"} />
-        <Stat label="NKRO Max" value={ds.nkroMax || "—"} sub={`${ds.currentHeld} held now`} color="#c0c8d0" />
+        <Stat label="NKRO Max" value={ds.nkroMax || "—"} sub={`${ds.currentHeld} held now`} color="#d4d4d8" />
       </div>
 
       {/* Switch analysis */}
-      <div style={{ width: "100%", maxWidth: 820, marginBottom: 10, background: "#0c0e10", border: "1px solid #151a1e", borderRadius: 8, padding: "12px 14px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
-          <div style={{ fontSize: 9, letterSpacing: 3, color: "#3a4048" }}>SWITCH TYPE ANALYSIS</div>
+      <div style={{ width: "100%", maxWidth: 820, marginBottom: 14, background: "#09090b", border: "1px solid #18181b", borderRadius: 12, padding: "16px 18px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontSize: 10, letterSpacing: 2, color: "#52525b", textTransform: "uppercase" }}>Switch Type Analysis</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 8, color: "#3a4048", border: `1px solid ${verdictColor}33`, borderRadius: 3, padding: "2px 6px", letterSpacing: 1 }}>{cl.confidence}</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: verdictColor, letterSpacing: 1 }}>{cl.verdict}</span>
+            <span style={{ fontSize: 9, color: "#52525b", background: `${verdictColor}15`, border: `1px solid ${verdictColor}25`, borderRadius: 4, padding: "2px 8px", letterSpacing: 0.5 }}>{cl.confidence}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: verdictColor }}>{cl.verdict}</span>
           </div>
         </div>
-        <div style={{ fontSize: 8, color: "#6a7078", lineHeight: 1.5, marginBottom: 10 }}>{cl.description}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
+        <div style={{ fontSize: 11, color: "#71717a", lineHeight: 1.6, marginBottom: 14 }}>{cl.description}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
           {[
-            { label: "HOLD P5", value: fmtP(ds.holdP5), sub: "ms", color: ds.holdP5 < 10 ? "#ff44cc" : ds.holdP5 < 25 ? "#44aaff" : ds.holdP5 < 40 ? "#ffaa44" : "#c0c8d0" },
-            { label: "REACT P5", value: fmtP(ds.reactP5), sub: "ms", color: ds.reactP5 < 10 ? "#ff44cc" : ds.reactP5 < 25 ? "#44aaff" : "#c0c8d0" },
-            { label: "MICRO%", value: ds.totalKeyups > 0 ? `${(ds.microRatio * 100).toFixed(1)}` : "—", sub: `<${MICRO_RELEASE_MS}ms`, color: ds.microRatio > 0.2 ? "#ff44cc" : ds.microRatio > 0.05 ? "#44aaff" : "#556" },
-            { label: "TAP RATE", value: ds.maxTapRate > 0 ? ds.maxTapRate.toFixed(1) : "—", sub: "taps/sec", color: ds.maxTapRate > 30 ? "#ff44cc" : ds.maxTapRate > 18 ? "#44aaff" : "#c0c8d0" },
-            { label: "AVG HOLD", value: ds.avgHold > 0 ? ds.avgHold.toFixed(1) : "—", sub: "ms", color: "#c0c8d0" },
-            { label: "GHOSTS", value: ds.ghostEvents, sub: "bounce evts", color: ds.ghostEvents > 3 ? "#ffaa44" : ds.ghostEvents > 0 ? "#ff5555" : "#556" },
+            { label: "HOLD P5", value: fmtP(ds.holdP5), sub: "ms", color: ds.holdP5 < 10 ? "#ff44cc" : ds.holdP5 < 25 ? "#44aaff" : ds.holdP5 < 42 ? "#ffaa44" : "#d4d4d8" },
+            { label: "REACT P5", value: fmtP(ds.reactP5), sub: "ms", color: ds.reactP5 < 10 ? "#ff44cc" : ds.reactP5 < 25 ? "#44aaff" : "#d4d4d8" },
+            { label: "MICRO%", value: ds.totalKeyups > 0 ? `${(ds.microRatio * 100).toFixed(1)}` : "—", sub: `<${MICRO_RELEASE_MS}ms`, color: ds.microRatio > 0.2 ? "#ff44cc" : ds.microRatio > 0.05 ? "#44aaff" : "#52525b" },
+            { label: "TAP RATE", value: ds.maxTapRate > 0 ? ds.maxTapRate.toFixed(1) : "—", sub: "taps/sec", color: ds.maxTapRate > 30 ? "#ff44cc" : ds.maxTapRate > 18 ? "#44aaff" : "#d4d4d8" },
+            { label: "AVG HOLD", value: ds.avgHold > 0 ? ds.avgHold.toFixed(1) : "—", sub: "ms", color: "#d4d4d8" },
+            { label: "GHOSTS", value: ds.ghostEvents, sub: "bounce", color: ds.ghostEvents > 3 ? "#ffaa44" : ds.ghostEvents > 0 ? "#ef4444" : "#52525b" },
           ].map((item, i) => (
-            <div key={i} style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 7, color: "#3a4048", letterSpacing: 1 }}>{item.label}</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: item.color }}>{item.value}</div>
-              {item.sub && <div style={{ fontSize: 7, color: "#4a5058" }}>{item.sub}</div>}
+            <div key={i} style={{ textAlign: "center", padding: "6px 0" }}>
+              <div style={{ fontSize: 9, color: "#52525b", letterSpacing: 1, marginBottom: 4 }}>{item.label}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: item.color }}>{item.value}</div>
+              {item.sub && <div style={{ fontSize: 8, color: "#3f3f46", marginTop: 2 }}>{item.sub}</div>}
             </div>
           ))}
         </div>
-        <div style={{ marginTop: 8, fontSize: 8, color: "#6a7078", lineHeight: 1.5 }}>
-          TIP: Rapidly tap a single key as fast as possible for 10+ seconds. The tool needs 50+ events for classification. Sub-10ms holds and near-instant re-activation are physically impossible on mechanical switches.
+        <div style={{ marginTop: 12, fontSize: 10, color: "#71717a", lineHeight: 1.6, borderTop: "1px solid #18181b", paddingTop: 10 }}>
+          Rapidly tap a single key for 10+ seconds. The tool needs 50+ events. Sub-10ms holds and instant re-activation are physically impossible on mechanical or membrane switches.
         </div>
       </div>
 
-      {/* Tab bar */}
-      <div style={{ display: "flex", gap: 2, marginBottom: 8, background: "#0c0e10", borderRadius: 5, padding: 2, flexWrap: "wrap" }}>
-        {["diagnostics", "event log", "intervals"].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: "5px 14px", fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: "inherit",
-            background: tab === t ? "#0f1a15" : "transparent", color: tab === t ? "#00ff88" : "#3a4048",
-            border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600,
-          }}>{t}</button>
-        ))}
-        <button onClick={() => setIsRecording(!isRecording)} style={{
-          padding: "5px 12px", fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: "inherit",
-          background: isRecording ? "#1a1518" : "#0f1a15", color: isRecording ? "#ff8855" : "#00ff88",
-          border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600,
-        }}>{isRecording ? "PAUSE" : "RESUME"}</button>
-        <button onClick={reset} style={{
-          padding: "5px 12px", fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: "inherit",
-          background: "#1a1215", color: "#ff5555", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600,
-        }}>RESET</button>
-        <button onClick={downloadReport} style={{
-          padding: "5px 12px", fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: "inherit",
-          background: "#0f1520", color: "#5588ff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600,
-        }}>EXPORT</button>
+      {/* Controls: tabs on left, actions on right */}
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        width: "100%", maxWidth: 820, marginBottom: 10, flexWrap: "wrap", gap: 8,
+      }}>
+        <div style={{ display: "flex", gap: 4, background: "#09090b", borderRadius: 10, padding: 3, border: "1px solid #18181b" }}>
+          {["diagnostics", "event log", "intervals"].map(t => (
+            <button key={t} onClick={() => setTab(t)} style={tabStyle(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setIsRecording(!isRecording)} style={actionBtn(isRecording ? "#1c1917" : "#052e16", isRecording ? "#f97316" : "#22c55e")}>
+            {isRecording ? "Pause" : "Resume"}
+          </button>
+          <button onClick={reset} style={actionBtn("#1c1917", "#ef4444")}>Reset</button>
+          <button onClick={downloadReport} style={actionBtn("#0c1222", "#3b82f6")}>Export</button>
+        </div>
       </div>
 
       {/* Content area */}
       <div ref={logRef} style={{
-        background: "#0c0e10", border: "1px solid #151a1e", borderRadius: 8, padding: 10,
-        width: "100%", maxWidth: 820, height: 400, overflowY: "auto", overflowX: "auto",
+        background: "#09090b", border: "1px solid #18181b", borderRadius: 12, padding: 14,
+        width: "100%", maxWidth: 820, height: 420, overflowY: "auto", overflowX: "auto",
       }}>
         {tab === "event log" && (
           <div style={{ minWidth: 600 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "70px 38px 50px 70px 80px 70px 1fr", gap: 0, fontSize: 9 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "72px 42px 52px 72px 82px 72px 1fr", gap: 0, fontSize: 10 }}>
               {["ELAPSED", "TYPE", "KEY", "CODE", "INTERVAL", "Hz", "DETAIL"].map(h => (
-                <div key={h} style={{ color: "#2a3038", padding: "3px 0", borderBottom: "1px solid #151a1e", letterSpacing: 1, fontSize: 8 }}>{h}</div>
+                <div key={h} style={{ color: "#52525b", padding: "6px 0", borderBottom: "1px solid #18181b", letterSpacing: 1, fontSize: 9, fontWeight: 500 }}>{h}</div>
               ))}
               {events.map((e, i) => {
                 const isDown = e.type === "DOWN";
                 return (
                   <React.Fragment key={i}>
-                    <div style={{ color: "#3a4048", padding: "2px 0" }}>{e.elapsed}s</div>
-                    <div style={{ color: isDown ? "#00ff88" : "#556", padding: "2px 0", fontWeight: 700 }}>
+                    <div style={{ color: "#52525b", padding: "3px 0" }}>{e.elapsed}s</div>
+                    <div style={{ color: isDown ? "#22c55e" : "#52525b", padding: "3px 0", fontWeight: 600 }}>
                       {e.type}{e.repeat ? "®" : ""}
                     </div>
-                    <div style={{ color: "#c0c8d0", padding: "2px 0", fontWeight: 600 }}>{e.key}</div>
-                    <div style={{ color: "#2a3038", padding: "2px 0", fontSize: 8 }}>{e.code}</div>
-                    <div style={{ color: "#5a6068", padding: "2px 0", fontVariantNumeric: "tabular-nums" }}>
+                    <div style={{ color: "#d4d4d8", padding: "3px 0", fontWeight: 600 }}>{e.key}</div>
+                    <div style={{ color: "#3f3f46", padding: "3px 0", fontSize: 9 }}>{e.code}</div>
+                    <div style={{ color: "#71717a", padding: "3px 0", fontVariantNumeric: "tabular-nums" }}>
                       {e.interval !== "—" ? `${e.interval}ms` : "—"}
                     </div>
-                    <div style={{ color: parseFloat(e.hz) > 200 ? "#00ff88" : "#5a6068", padding: "2px 0" }}>
+                    <div style={{ color: parseFloat(e.hz) > 200 ? "#22c55e" : "#71717a", padding: "3px 0" }}>
                       {e.hz !== "—" ? e.hz : "—"}
                     </div>
-                    <div style={{ color: "#3a4048", padding: "2px 0", fontSize: 8 }}>{e.extra}</div>
+                    <div style={{ color: "#52525b", padding: "3px 0", fontSize: 9 }}>{e.extra}</div>
                   </React.Fragment>
                 );
               })}
             </div>
-            {events.length === 0 && <div style={{ textAlign: "center", color: "#1a1e22", marginTop: 80, fontSize: 10 }}>Press keys to see events...</div>}
+            {events.length === 0 && <div style={{ textAlign: "center", color: "#27272a", marginTop: 100, fontSize: 12 }}>Press any key to begin...</div>}
           </div>
         )}
 
         {tab === "diagnostics" && (
-          <div style={{ fontSize: 10, lineHeight: 1.8, color: "#5a6068" }}>
-            <div style={{ color: "#00ff88", fontSize: 9, letterSpacing: 3, marginBottom: 8 }}>SYSTEM DIAGNOSTICS</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ fontSize: 11, lineHeight: 1.9, color: "#71717a" }}>
+            <div style={{ color: "#22c55e", fontSize: 10, letterSpacing: 2, marginBottom: 10, fontWeight: 600 }}>SYSTEM DIAGNOSTICS</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <div>
-                <div style={{ color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>EVENT TIMING</div>
+                <div style={{ color: "#52525b", fontSize: 9, letterSpacing: 2, marginBottom: 6, fontWeight: 600 }}>EVENT TIMING</div>
                 <div>Avg event rate: <span style={{ color: rateColor, fontWeight: 700 }}>{ds.avgRate > 0 ? `${ds.avgRate.toFixed(2)} Hz` : "—"}</span></div>
-                <div>Peak event rate: <span style={{ color: "#c0c8d0", fontWeight: 600 }}>{ds.peakRate > 0 ? `${ds.peakRate.toFixed(2)} Hz` : "—"}</span></div>
-                <div>Min interval: <span style={{ color: "#c0c8d0" }}>{ds.minInterval < Infinity ? `${ds.minInterval.toFixed(3)} ms` : "—"}</span></div>
-                <div>Jitter (σ): <span style={{ color: ds.jitter < 15 ? "#00ff88" : "#ffaa00" }}>{ds.jitter > 0 ? `±${ds.jitter.toFixed(3)} ms` : "—"}</span></div>
-                <div>Total events: <span style={{ color: "#c0c8d0" }}>{ds.totalEvents}</span> <span style={{ color: "#3a4048", fontSize: 8 }}>({ds.totalKeydowns} presses, {ds.totalKeyups} releases)</span></div>
+                <div>Peak event rate: <span style={{ color: "#d4d4d8", fontWeight: 600 }}>{ds.peakRate > 0 ? `${ds.peakRate.toFixed(2)} Hz` : "—"}</span></div>
+                <div>Min interval: <span style={{ color: "#d4d4d8" }}>{ds.minInterval < Infinity ? `${ds.minInterval.toFixed(3)} ms` : "—"}</span></div>
+                <div>Jitter (σ): <span style={{ color: ds.jitter < 15 ? "#22c55e" : "#eab308" }}>{ds.jitter > 0 ? `±${ds.jitter.toFixed(3)} ms` : "—"}</span></div>
+                <div>Total events: <span style={{ color: "#d4d4d8" }}>{ds.totalEvents}</span> <span style={{ color: "#52525b", fontSize: 9 }}>({ds.totalKeydowns} presses, {ds.totalKeyups} releases)</span></div>
               </div>
               <div>
-                <div style={{ color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>HOLD DURATION DISTRIBUTION</div>
+                <div style={{ color: "#52525b", fontSize: 9, letterSpacing: 2, marginBottom: 6, fontWeight: 600 }}>HOLD DURATION DISTRIBUTION</div>
                 {ds.totalKeyups > 0 ? (
-                  <div style={{ fontSize: 9 }}>
+                  <div style={{ fontSize: 10 }}>
                     {[
                       { label: "P5", val: ds.holdP5 },
                       { label: "P25", val: ds.holdP25 },
@@ -717,53 +731,53 @@ export default function KeyboardTester() {
                       { label: "P95", val: ds.holdP95 },
                     ].map(({ label, val }) => {
                       const w = !isNaN(val) && ds.holdP95 > 0 ? Math.min(100, (val / ds.holdP95) * 100) : 0;
-                      const c = val < 10 ? "#ff44cc" : val < 25 ? "#44aaff" : val < 40 ? "#ffaa44" : "#3a4048";
+                      const c = val < 10 ? "#ff44cc" : val < 25 ? "#44aaff" : val < 42 ? "#ffaa44" : "#52525b";
                       return (
-                        <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                          <span style={{ width: 24, textAlign: "right", color: "#3a4048", fontSize: 8 }}>{label}</span>
-                          <div style={{ flex: 1, height: 6, background: "#111418", borderRadius: 3, overflow: "hidden" }}>
-                            <div style={{ width: `${w}%`, height: "100%", background: c, borderRadius: 3, transition: "width 0.3s" }} />
+                        <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                          <span style={{ width: 26, textAlign: "right", color: "#52525b", fontSize: 9, fontWeight: 500 }}>{label}</span>
+                          <div style={{ flex: 1, height: 7, background: "#18181b", borderRadius: 4, overflow: "hidden" }}>
+                            <div style={{ width: `${w}%`, height: "100%", background: c, borderRadius: 4, transition: "width 0.3s" }} />
                           </div>
-                          <span style={{ width: 50, fontSize: 8, color: c, fontWeight: 600 }}>{fmtP(val)}ms</span>
+                          <span style={{ width: 55, fontSize: 9, color: c, fontWeight: 600, textAlign: "right" }}>{fmtP(val)}ms</span>
                         </div>
                       );
                     })}
-                    <div style={{ fontSize: 8, color: "#556068", marginTop: 2 }}>
+                    <div style={{ fontSize: 9, color: "#52525b", marginTop: 4 }}>
                       σ = {ds.holdStdDev > 0 ? ds.holdStdDev.toFixed(1) : "—"}ms &nbsp; avg = {ds.avgHold > 0 ? ds.avgHold.toFixed(1) : "—"}ms
                     </div>
                   </div>
-                ) : <div style={{ color: "#1a1e22", fontSize: 9 }}>Press and release keys to see distribution...</div>}
+                ) : <div style={{ color: "#27272a", fontSize: 10 }}>Press and release keys to see distribution...</div>}
               </div>
             </div>
 
             {/* Re-activation analysis */}
-            <div style={{ marginTop: 12, color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>RE-ACTIVATION ANALYSIS</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 10 }}>
+            <div style={{ marginTop: 16, color: "#52525b", fontSize: 9, letterSpacing: 2, marginBottom: 6, fontWeight: 600 }}>RE-ACTIVATION ANALYSIS</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, fontSize: 11 }}>
               <div>
-                <div>Re-activation P5: <span style={{ color: ds.reactP5 < 10 ? "#ff44cc" : ds.reactP5 < 25 ? "#44aaff" : "#c0c8d0", fontWeight: 600 }}>{fmtP(ds.reactP5)} ms</span></div>
-                <div>Re-activation median: <span style={{ color: "#c0c8d0" }}>{fmtP(ds.reactMedian)} ms</span></div>
-                <div>Re-activation min: <span style={{ color: "#c0c8d0" }}>{ds.reactMin < Infinity ? ds.reactMin.toFixed(2) : "—"} ms</span></div>
+                <div>Re-activation P5: <span style={{ color: ds.reactP5 < 10 ? "#ff44cc" : ds.reactP5 < 25 ? "#44aaff" : "#d4d4d8", fontWeight: 600 }}>{fmtP(ds.reactP5)} ms</span></div>
+                <div>Re-activation median: <span style={{ color: "#d4d4d8" }}>{fmtP(ds.reactMedian)} ms</span></div>
+                <div>Re-activation min: <span style={{ color: "#d4d4d8" }}>{ds.reactMin < Infinity ? ds.reactMin.toFixed(2) : "—"} ms</span></div>
               </div>
               <div>
-                <div>Max tap rate: <span style={{ color: ds.maxTapRate > 30 ? "#ff44cc" : ds.maxTapRate > 18 ? "#44aaff" : "#c0c8d0", fontWeight: 600 }}>{ds.maxTapRate > 0 ? `${ds.maxTapRate.toFixed(1)} taps/sec` : "—"}</span></div>
-                <div>Micro-releases: <span style={{ color: ds.microReleases > 3 ? "#ffaa00" : "#c0c8d0" }}>{ds.microReleases}</span> <span style={{ color: "#3a4048", fontSize: 8 }}>({(ds.microRatio * 100).toFixed(1)}% of releases)</span></div>
-                <div>Ghost events: <span style={{ color: ds.ghostEvents > 0 ? "#ff5555" : "#c0c8d0" }}>{ds.ghostEvents}</span></div>
+                <div>Max tap rate: <span style={{ color: ds.maxTapRate > 30 ? "#ff44cc" : ds.maxTapRate > 18 ? "#44aaff" : "#d4d4d8", fontWeight: 600 }}>{ds.maxTapRate > 0 ? `${ds.maxTapRate.toFixed(1)} taps/sec` : "—"}</span></div>
+                <div>Micro-releases: <span style={{ color: ds.microReleases > 3 ? "#eab308" : "#d4d4d8" }}>{ds.microReleases}</span> <span style={{ color: "#52525b", fontSize: 9 }}>({(ds.microRatio * 100).toFixed(1)}%)</span></div>
+                <div>Ghost events: <span style={{ color: ds.ghostEvents > 0 ? "#ef4444" : "#d4d4d8" }}>{ds.ghostEvents}</span></div>
               </div>
             </div>
-            <div style={{ fontSize: 8, color: "#556068", marginTop: 2, lineHeight: 1.5 }}>
-              Re-activation = time from releasing a key to pressing the same key again. Mechanical keyboards need {">"}25ms (physical reset travel). Rapid trigger can re-actuate in {"<"}5ms.
+            <div style={{ fontSize: 10, color: "#52525b", marginTop: 4, lineHeight: 1.6 }}>
+              Re-activation = time from releasing a key to pressing the same key again. Mechanical needs {">"}25ms. Rapid trigger can re-actuate in {"<"}5ms.
             </div>
 
             {/* Classification evidence */}
             {cl.signals.length > 0 && (
               <>
-                <div style={{ marginTop: 12, color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 6 }}>CLASSIFICATION EVIDENCE</div>
+                <div style={{ marginTop: 16, color: "#52525b", fontSize: 9, letterSpacing: 2, marginBottom: 8, fontWeight: 600 }}>CLASSIFICATION EVIDENCE</div>
                 {cl.signals.map((sig, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 4, fontSize: 9, lineHeight: 1.5 }}>
-                    <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 3, background: SIGNAL_COLORS[sig.supports], marginTop: 4, flexShrink: 0 }} />
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6, fontSize: 10, lineHeight: 1.6 }}>
+                    <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 4, background: SIGNAL_COLORS[sig.supports], marginTop: 5, flexShrink: 0 }} />
                     <div>
                       <span style={{ color: SIGNAL_COLORS[sig.supports], fontWeight: 600 }}>{sig.name}</span>
-                      <span style={{ color: "#5a6068" }}> — {sig.finding}</span>
+                      <span style={{ color: "#71717a" }}> — {sig.finding}</span>
                     </div>
                   </div>
                 ))}
@@ -771,66 +785,66 @@ export default function KeyboardTester() {
             )}
 
             {/* How to test */}
-            <div style={{ marginTop: 12, color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>HOW TO TEST</div>
-            <div style={{ fontSize: 9, color: "#5a6068", lineHeight: 1.7 }}>
-              1. Tap a single key as fast as possible for 10+ sec — measures hold floor, re-activation speed, and tap rate<br />
-              2. Press and hold 6+ keys simultaneously — tests N-key rollover (NKRO)<br />
-              3. Focus on minimal finger movement during rapid tapping — rapid trigger keyboards show sub-10ms holds<br />
-              4. Use EXPORT to download the full report as JSON for external analysis
+            <div style={{ marginTop: 16, color: "#52525b", fontSize: 9, letterSpacing: 2, marginBottom: 6, fontWeight: 600 }}>HOW TO TEST</div>
+            <div style={{ fontSize: 10, color: "#71717a", lineHeight: 1.8 }}>
+              1. Tap a single key rapidly for 10+ sec — measures hold floor, re-activation, and tap rate<br />
+              2. Press and hold 6+ keys — tests N-key rollover<br />
+              3. Minimal finger travel during rapid tapping — rapid trigger shows sub-10ms holds<br />
+              4. Export the full report as JSON for offline analysis
             </div>
           </div>
         )}
 
         {tab === "intervals" && (
           <div>
-            <div style={{ color: "#00ff88", fontSize: 9, letterSpacing: 3, marginBottom: 8 }}>KEYDOWN INTERVAL DISTRIBUTION</div>
+            <div style={{ color: "#22c55e", fontSize: 10, letterSpacing: 2, marginBottom: 10, fontWeight: 600 }}>KEYDOWN INTERVAL DISTRIBUTION</div>
             {ds.keydownIntervals.length > 0 ? (
               <React.Fragment>
-                <div style={{ display: "flex", alignItems: "flex-end", height: 180, gap: 1, padding: "0 4px" }}>
+                <div style={{ display: "flex", alignItems: "flex-end", height: 200, gap: 1, padding: "0 6px" }}>
                   {(() => {
                     const maxVal = Math.max(...ds.keydownIntervals);
                     return ds.keydownIntervals.map((v, i) => {
-                      const h = maxVal > 0 ? (v / maxVal) * 160 : 0;
+                      const h = maxVal > 0 ? (v / maxVal) * 180 : 0;
                       const rate = 1000 / v;
-                      const color = rate > 30 ? "#00ff88" : rate > 15 ? "#88ff00" : rate > 5 ? "#ffaa00" : "#ff5555";
+                      const color = rate > 30 ? "#22c55e" : rate > 15 ? "#84cc16" : rate > 5 ? "#eab308" : "#ef4444";
                       return (
                         <div key={i} style={{
                           flex: 1, minWidth: 2, maxWidth: 8, height: h, background: color,
-                          borderRadius: "2px 2px 0 0", opacity: 0.8,
+                          borderRadius: "2px 2px 0 0", opacity: 0.85,
                         }} title={`${v.toFixed(3)}ms (${rate.toFixed(0)}Hz)`} />
                       );
                     });
                   })()}
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#4a5058", marginTop: 4, padding: "0 4px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#52525b", marginTop: 6, padding: "0 6px" }}>
                   <span>← older</span>
-                  <span>Last 100 keydown intervals — shorter bars = faster tapping</span>
+                  <span>Last 100 keydown intervals — shorter bars = faster</span>
                   <span>newer →</span>
                 </div>
-                <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 8, fontSize: 8 }}>
+                <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 10, fontSize: 9 }}>
                   {[
-                    { color: "#00ff88", label: ">30Hz" },
-                    { color: "#88ff00", label: ">15Hz" },
-                    { color: "#ffaa00", label: ">5Hz" },
-                    { color: "#ff5555", label: "<5Hz" },
+                    { color: "#22c55e", label: ">30Hz" },
+                    { color: "#84cc16", label: ">15Hz" },
+                    { color: "#eab308", label: ">5Hz" },
+                    { color: "#ef4444", label: "<5Hz" },
                   ].map((l, i) => (
-                    <span key={i}>
-                      <span style={{ display: "inline-block", width: 8, height: 8, background: l.color, borderRadius: 1, marginRight: 4, verticalAlign: "middle" }} />
+                    <span key={i} style={{ color: "#71717a" }}>
+                      <span style={{ display: "inline-block", width: 8, height: 8, background: l.color, borderRadius: 2, marginRight: 5, verticalAlign: "middle" }} />
                       {l.label}
                     </span>
                   ))}
                 </div>
               </React.Fragment>
             ) : (
-              <div style={{ textAlign: "center", color: "#1a1e22", marginTop: 60, fontSize: 10 }}>Press keys to see interval histogram...</div>
+              <div style={{ textAlign: "center", color: "#27272a", marginTop: 80, fontSize: 12 }}>Press keys to see interval histogram...</div>
             )}
           </div>
         )}
       </div>
 
       {/* Disclaimer */}
-      <div style={{ marginTop: 8, fontSize: 8, color: "#1a1e22", textAlign: "center", maxWidth: 820, lineHeight: 1.5 }}>
-        Browser event timing is limited to ~1-4ms resolution. Classification uses behavioral heuristics from key event patterns, not direct hardware access. For definitive results, use native USB protocol analysis. Export your data with EXPORT for detailed offline analysis. Privacy: all processing happens entirely in your browser — no keystroke data is collected, transmitted, or stored on any server. Exported files are saved locally to your device only.
+      <div style={{ marginTop: 10, fontSize: 9, color: "#27272a", textAlign: "center", maxWidth: 820, lineHeight: 1.6 }}>
+        Browser event timing is limited to ~1-4ms resolution. Classification uses behavioral heuristics, not direct hardware access. Privacy: all processing happens entirely in your browser — no keystroke data is collected, transmitted, or stored on any server.
       </div>
     </div>
   );
