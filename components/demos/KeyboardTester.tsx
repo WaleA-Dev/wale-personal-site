@@ -61,7 +61,7 @@ interface InternalStats {
 interface ClassSignal {
   name: string;
   finding: string;
-  supports: "rapid_trigger" | "magnetic" | "mechanical" | "neutral";
+  supports: "rapid_trigger" | "magnetic" | "mechanical" | "membrane" | "neutral";
 }
 
 interface Classification {
@@ -132,6 +132,7 @@ function classifySwitch(m: {
   microRatio: number; maxTapRate: number;
   ghostEvents: number; totalEvents: number; totalKeyups: number;
   holdCount: number; reactCount: number;
+  nkroMax: number; testedKeys: number;
 }): Classification {
   if (m.totalEvents < 50) {
     return {
@@ -145,69 +146,85 @@ function classifySwitch(m: {
   const signals: ClassSignal[] = [];
 
   // Signal 1: Hold duration floor (5th percentile)
-  // Mechanical switches need ~2mm travel + debounce → floor typically >30ms
-  // Magnetic rapid trigger at 0.1mm actuation → sub-8ms holds achievable
+  // Rubber dome membrane: mushy travel, P5 typically 45-80ms
+  // Mechanical spring: crisper travel, P5 typically 25-40ms
+  // Magnetic: configurable actuation, P5 can be 8-25ms
+  // Rapid trigger: 0.1mm actuation, P5 < 8ms
   if (m.holdCount >= 10) {
     const p5 = m.holdP5;
     if (!isNaN(p5)) {
       if (p5 < 8) {
-        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — sub-8ms holds are physically impossible on mechanical switches (require ~2mm travel + debounce)`, supports: "rapid_trigger" });
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — sub-8ms holds are physically impossible on mechanical/membrane (require full travel cycle)`, supports: "rapid_trigger" });
       } else if (p5 < 15) {
-        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — very short holds, below typical mechanical floor (~30ms), consistent with magnetic switches`, supports: "magnetic" });
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — very short holds, well below mechanical (~30ms) or membrane (~50ms) floor`, supports: "magnetic" });
       } else if (p5 < 25) {
-        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — borderline short holds, could be fast typing on mechanical or magnetic switches`, supports: "neutral" });
-      } else if (p5 < 40) {
-        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — consistent with mechanical switch travel distance and firmware debounce`, supports: "mechanical" });
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — short holds, could be magnetic switches or very fast mechanical typing`, supports: "neutral" });
+      } else if (p5 < 42) {
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — consistent with mechanical switch springs (~2mm travel + debounce)`, supports: "mechanical" });
+      } else if (p5 < 60) {
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — elevated hold floor, consistent with membrane rubber dome actuation (mushier than mechanical springs)`, supports: "membrane" });
       } else {
-        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — long hold floor, typical of mechanical or membrane switches`, supports: "mechanical" });
+        signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — high hold floor, typical of membrane rubber dome keyboards`, supports: "membrane" });
       }
     }
   }
 
   // Signal 2: Same-key re-activation speed (keyup → next keydown of same key)
-  // Mechanical: key must travel ~0.4mm up past reset point then ~2mm down → >25ms
-  // Rapid trigger: reset at 0.1mm, actuation at 0.1mm → near-instant
   if (m.reactCount >= 5) {
     const rp5 = m.reactP5;
     if (!isNaN(rp5)) {
       if (rp5 < 8) {
-        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — near-instant same-key re-activation, hallmark of rapid trigger (0.1mm reset distance)`, supports: "rapid_trigger" });
+        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — near-instant same-key re-activation, hallmark of rapid trigger (0.1mm reset)`, supports: "rapid_trigger" });
       } else if (rp5 < 20) {
         signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — fast re-activation, below mechanical reset travel time`, supports: "magnetic" });
-      } else if (rp5 < 35) {
-        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — moderate re-activation speed`, supports: "neutral" });
+      } else if (rp5 < 40) {
+        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — moderate re-activation, consistent with mechanical spring reset`, supports: "neutral" });
+      } else if (rp5 < 80) {
+        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — slow re-activation, consistent with mechanical hysteresis`, supports: "mechanical" });
       } else {
-        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — consistent with full mechanical key reset travel (~0.4mm hysteresis)`, supports: "mechanical" });
+        signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — very slow re-activation, rubber dome membranes need longer to rebound`, supports: "membrane" });
       }
     }
   }
 
-  // Signal 3: Micro-release ratio (% of holds under 20ms)
+  // Signal 3: Minimum re-activation gap (absolute fastest same-key repeat)
+  // Mechanical spring reset: ~30-50ms minimum achievable
+  // Membrane rubber dome: ~55-80ms minimum (dome needs to fully reform)
+  if (m.reactCount >= 3 && m.reactMin < Infinity) {
+    if (m.reactMin > 55) {
+      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(0)}ms — rubber dome membranes physically can't reset faster than ~55ms`, supports: "membrane" });
+    } else if (m.reactMin > 35) {
+      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(0)}ms — consistent with mechanical spring reset cycle`, supports: "mechanical" });
+    } else if (m.reactMin < 10) {
+      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(0)}ms — near-instant, only possible with rapid trigger`, supports: "rapid_trigger" });
+    }
+  }
+
+  // Signal 4: Micro-release ratio (% of holds under 20ms)
   if (m.totalKeyups >= 20) {
     if (m.microRatio > 0.2) {
-      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% of holds were <20ms — high rate of ultra-short holds, strong rapid trigger indicator`, supports: "rapid_trigger" });
+      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% of holds were <20ms — strong rapid trigger indicator`, supports: "rapid_trigger" });
     } else if (m.microRatio > 0.05) {
       signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% micro-releases — some very short holds detected`, supports: "magnetic" });
     } else if (m.microRatio < 0.01 && m.totalKeyups >= 50) {
-      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% — virtually no sub-20ms holds, consistent with mechanical travel constraints`, supports: "mechanical" });
+      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% — virtually no sub-20ms holds, consistent with physical travel constraints`, supports: "mechanical" });
     }
   }
 
-  // Signal 4: Maximum single-key tap rate
-  // Human physical limit on mechanical: ~15-20 taps/sec (need full travel cycle)
-  // Rapid trigger: 25-50+ taps/sec (minimal travel)
+  // Signal 5: Maximum single-key tap rate
   if (m.maxTapRate > 0) {
     if (m.maxTapRate > 30) {
-      signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — exceeds human mechanical limit (~20/sec), indicates rapid trigger`, supports: "rapid_trigger" });
+      signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — exceeds mechanical/membrane limit (~15-20/sec), indicates rapid trigger`, supports: "rapid_trigger" });
     } else if (m.maxTapRate > 18) {
-      signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — very fast, at the edge of what's possible on mechanical`, supports: "magnetic" });
-    } else if (m.maxTapRate > 5) {
-      signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — within normal range for mechanical switches`, supports: "neutral" });
+      signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — very fast, at the edge of mechanical capability`, supports: "magnetic" });
+    } else if (m.maxTapRate > 10) {
+      signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — normal range for mechanical switches`, supports: "neutral" });
+    } else if (m.maxTapRate <= 10 && m.maxTapRate > 0) {
+      signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — low tap rate, rubber dome resistance limits rapid tapping`, supports: "membrane" });
     }
   }
 
-  // Signal 5: Hold duration consistency
-  // Analog sensing = clean, uniform timing; contact-based = noisier from bounce/debounce
+  // Signal 6: Hold duration consistency
   if (m.holdCount >= 20 && m.holdMean > 0) {
     const cv = m.holdStdDev / m.holdMean;
     if (cv < 0.2 && m.holdMean < 40) {
@@ -217,41 +234,55 @@ function classifySwitch(m: {
     }
   }
 
-  // Signal 6: Ghost/bounce events
+  // Signal 7: Ghost/bounce events
   if (m.totalEvents >= 100) {
     if (m.ghostEvents > 3) {
-      signals.push({ name: "Contact Bounce", finding: `${m.ghostEvents} ghost events — repeated keydown without keyup, characteristic of contact-based switch bounce`, supports: "mechanical" });
+      signals.push({ name: "Contact Bounce", finding: `${m.ghostEvents} ghost events — repeated keydown without keyup, characteristic of mechanical switch bounce`, supports: "mechanical" });
     } else if (m.ghostEvents === 0) {
-      signals.push({ name: "Contact Bounce", finding: `0 ghost events — clean signaling, consistent with analog (non-contact) sensing`, supports: "magnetic" });
+      signals.push({ name: "Contact Bounce", finding: `0 ghost events — clean signaling, both membrane and magnetic switches avoid contact bounce`, supports: "neutral" });
+    }
+  }
+
+  // Signal 8: NKRO capability
+  // Membrane keyboards use a simpler matrix: typically 3-6 key rollover
+  // Mechanical with diodes: often full NKRO (10+ simultaneous keys)
+  if (m.nkroMax > 0) {
+    if (m.nkroMax <= 3 && m.testedKeys >= 8) {
+      signals.push({ name: "Key Rollover", finding: `Max ${m.nkroMax} simultaneous keys — low rollover is characteristic of membrane matrix design. Press 6+ keys at once to confirm.`, supports: "membrane" });
+    } else if (m.nkroMax >= 10) {
+      signals.push({ name: "Key Rollover", finding: `Max ${m.nkroMax} simultaneous keys — full NKRO, typically found on mechanical keyboards with diode matrix`, supports: "mechanical" });
     }
   }
 
   // Tally weighted scores
-  let rt = 0, mag = 0, mech = 0;
+  let rt = 0, mag = 0, mech = 0, mem = 0;
   for (const sig of signals) {
     switch (sig.supports) {
       case "rapid_trigger": rt += 1.0; mag += 0.3; break;
       case "magnetic": mag += 1.0; break;
       case "mechanical": mech += 1.0; break;
+      case "membrane": mem += 1.0; break;
     }
   }
 
-  const total = rt + mag + mech;
+  const total = rt + mag + mech + mem;
   if (total === 0 || signals.length < 2) {
     return { verdict: "INCONCLUSIVE", confidence: "LOW", description: "Not enough distinguishing signals. Rapidly tap a single key for 10+ seconds to generate more data.", signals };
   }
 
-  const maxScore = Math.max(rt, mag, mech);
+  const maxScore = Math.max(rt, mag, mech, mem);
   const dominance = maxScore / total;
   const dataRich = m.totalEvents >= 100 && m.holdCount >= 30;
-  const conf: "HIGH" | "MEDIUM" | "LOW" = dominance > 0.55 && dataRich ? "HIGH" : dominance > 0.4 ? "MEDIUM" : "LOW";
+  const conf: "HIGH" | "MEDIUM" | "LOW" = dominance > 0.5 && dataRich ? "HIGH" : dominance > 0.35 ? "MEDIUM" : "LOW";
 
-  if (rt >= mag && rt >= mech) {
-    return { verdict: "RAPID TRIGGER", confidence: conf, description: "Magnetic/Hall effect switches with rapid trigger enabled. Ultra-short holds and near-instant re-activation detected — impossible on mechanical switches.", signals };
-  } else if (mag >= mech) {
+  if (rt >= mag && rt >= mech && rt >= mem) {
+    return { verdict: "RAPID TRIGGER", confidence: conf, description: "Magnetic/Hall effect switches with rapid trigger enabled. Ultra-short holds and near-instant re-activation detected — physically impossible on mechanical or membrane switches.", signals };
+  } else if (mag >= mech && mag >= mem) {
     return { verdict: "LIKELY MAGNETIC", confidence: conf, description: "Characteristics consistent with magnetic/Hall effect switches. Clean timing with short hold durations and no contact bounce artifacts.", signals };
+  } else if (mem > mech) {
+    return { verdict: "LIKELY MEMBRANE", confidence: conf, description: "Characteristics consistent with membrane (rubber dome) keyboard. Elevated hold durations, slow re-activation, and limited key rollover — rubber domes are mushier and slower to reset than mechanical springs.", signals };
   } else {
-    return { verdict: "LIKELY MECHANICAL", confidence: conf, description: "Characteristics consistent with traditional mechanical switches. Hold patterns match physical key travel distance and firmware debounce behavior.", signals };
+    return { verdict: "LIKELY MECHANICAL", confidence: conf, description: "Characteristics consistent with traditional mechanical switches. Hold patterns match spring-based travel distance and firmware debounce behavior.", signals };
   }
 }
 
@@ -259,11 +290,12 @@ const VERDICT_COLORS: Record<string, string> = {
   "RAPID TRIGGER": "#ff44cc",
   "LIKELY MAGNETIC": "#44aaff",
   "LIKELY MECHANICAL": "#ffaa44",
+  "LIKELY MEMBRANE": "#22ccaa",
   "INCONCLUSIVE": "#888888",
   "NEED MORE DATA": "#555555",
 };
 const SIGNAL_COLORS: Record<string, string> = {
-  rapid_trigger: "#ff44cc", magnetic: "#44aaff", mechanical: "#ffaa44", neutral: "#555555",
+  rapid_trigger: "#ff44cc", magnetic: "#44aaff", mechanical: "#ffaa44", membrane: "#22ccaa", neutral: "#555555",
 };
 
 // --- Component ---
@@ -320,6 +352,7 @@ export default function KeyboardTester() {
       ghostEvents: s.ghostEvents,
       totalEvents: s.totalEvents, totalKeyups: s.totalKeyups,
       holdCount: holds.length, reactCount: s.reactivationGaps.length,
+      nkroMax: s.nkroMax, testedKeys: s.testedKeys.size,
     });
 
     return {
@@ -545,15 +578,15 @@ export default function KeyboardTester() {
       <div style={{ textAlign: "center", marginBottom: 14 }}>
         <div style={{ fontSize: 9, letterSpacing: 8, color: "#2a3038" }}>ADVANCED</div>
         <h1 style={{ fontSize: 22, fontWeight: 800, color: "#00ff88", letterSpacing: -0.5, margin: "2px 0" }}>KEY DIAGNOSTICS</h1>
-        <div style={{ display: "flex", gap: 12, justifyContent: "center", fontSize: 9, color: "#4a5058", flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 14, justifyContent: "center", fontSize: 12, color: "#5a6068", flexWrap: "wrap", alignItems: "center" }}>
           <span>EVENTS: {ds.totalEvents}</span>
           <span>PHYSICAL: {ds.totalKeydowns}</span>
           <span style={{ color: isRecording ? "#00ff88" : "#ff5555", animation: isRecording ? "blink 1.5s infinite" : "none" }}>
             {isRecording ? "● RECORDING" : "○ PAUSED"}
           </span>
           <span style={{
-            color: verdictColor, fontWeight: 700, letterSpacing: 1,
-            border: `1px solid ${verdictColor}44`, borderRadius: 4, padding: "2px 8px",
+            color: verdictColor, fontWeight: 700, fontSize: 11, letterSpacing: 1,
+            border: `1px solid ${verdictColor}44`, borderRadius: 4, padding: "3px 10px",
             transition: "all 0.3s ease",
           }}>
             {cl.verdict}
