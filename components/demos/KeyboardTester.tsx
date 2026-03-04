@@ -180,10 +180,10 @@ export default function KeyboardTester() {
 
   useEffect(() => {
     if (!isRecording) return;
-    const s = statsRef.current;
 
     const handleDown = (e: KeyboardEvent) => {
       e.preventDefault();
+      const s = statsRef.current;
       const now = performance.now();
       const key = KEY_CODE_MAP[e.code] || e.key;
 
@@ -231,6 +231,7 @@ export default function KeyboardTester() {
 
     const handleUp = (e: KeyboardEvent) => {
       e.preventDefault();
+      const s = statsRef.current;
       const now = performance.now();
       const key = KEY_CODE_MAP[e.code] || e.key;
 
