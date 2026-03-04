@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { Instrument_Serif, DM_Sans } from "next/font/google";
+import { Instrument_Serif, DM_Sans, JetBrains_Mono } from "next/font/google";
+import Navigation from "@/components/Navigation";
 import "./globals.css";
 
 const instrumentSerif = Instrument_Serif({
@@ -11,6 +12,12 @@ const instrumentSerif = Instrument_Serif({
 
 const dmSans = DM_Sans({
   variable: "--font-dm-sans",
+  subsets: ["latin"],
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
   subsets: ["latin"],
   display: "swap",
 });
@@ -35,8 +42,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${instrumentSerif.variable} ${dmSans.variable} antialiased`}
+        className={`${instrumentSerif.variable} ${dmSans.variable} ${jetbrainsMono.variable} antialiased`}
       >
+        <Navigation />
         {children}
       </body>
     </html>
