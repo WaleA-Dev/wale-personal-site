@@ -460,8 +460,8 @@ export default function KeyboardTester() {
 
   const logRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [events]);
+    if (tab === "event log" && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [events, tab]);
 
   const reset = () => {
     eventsRef.current = [];
@@ -533,7 +533,7 @@ export default function KeyboardTester() {
     <div style={{ background: "#0c0e10", border: "1px solid #151a1e", borderRadius: 6, padding: "8px 6px", textAlign: "center" }}>
       <div style={{ fontSize: 8, letterSpacing: 2, color: "#3a4048", marginBottom: 3, textTransform: "uppercase" }}>{label}</div>
       <div style={{ fontSize: 18, fontWeight: 700, color: color || "#00ff88", lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 8, color: "#2a3038", marginTop: 2 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 8, color: "#4a5058", marginTop: 2 }}>{sub}</div>}
     </div>
   );
 
@@ -545,11 +545,18 @@ export default function KeyboardTester() {
       <div style={{ textAlign: "center", marginBottom: 14 }}>
         <div style={{ fontSize: 9, letterSpacing: 8, color: "#2a3038" }}>ADVANCED</div>
         <h1 style={{ fontSize: 22, fontWeight: 800, color: "#00ff88", letterSpacing: -0.5, margin: "2px 0" }}>KEY DIAGNOSTICS</h1>
-        <div style={{ display: "flex", gap: 12, justifyContent: "center", fontSize: 9, color: "#2a3038", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 12, justifyContent: "center", fontSize: 9, color: "#4a5058", flexWrap: "wrap", alignItems: "center" }}>
           <span>EVENTS: {ds.totalEvents}</span>
           <span>PHYSICAL: {ds.totalKeydowns}</span>
           <span style={{ color: isRecording ? "#00ff88" : "#ff5555", animation: isRecording ? "blink 1.5s infinite" : "none" }}>
             {isRecording ? "● RECORDING" : "○ PAUSED"}
+          </span>
+          <span style={{
+            color: verdictColor, fontWeight: 700, letterSpacing: 1,
+            border: `1px solid ${verdictColor}44`, borderRadius: 4, padding: "2px 8px",
+            transition: "all 0.3s ease",
+          }}>
+            {cl.verdict}
           </span>
         </div>
       </div>
@@ -571,7 +578,7 @@ export default function KeyboardTester() {
             <span style={{ fontSize: 11, fontWeight: 700, color: verdictColor, letterSpacing: 1 }}>{cl.verdict}</span>
           </div>
         </div>
-        <div style={{ fontSize: 8, color: "#3a4048", lineHeight: 1.5, marginBottom: 10 }}>{cl.description}</div>
+        <div style={{ fontSize: 8, color: "#6a7078", lineHeight: 1.5, marginBottom: 10 }}>{cl.description}</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
           {[
             { label: "HOLD P5", value: fmtP(ds.holdP5), sub: "ms", color: ds.holdP5 < 10 ? "#ff44cc" : ds.holdP5 < 25 ? "#44aaff" : ds.holdP5 < 40 ? "#ffaa44" : "#c0c8d0" },
@@ -584,11 +591,11 @@ export default function KeyboardTester() {
             <div key={i} style={{ textAlign: "center" }}>
               <div style={{ fontSize: 7, color: "#3a4048", letterSpacing: 1 }}>{item.label}</div>
               <div style={{ fontSize: 15, fontWeight: 700, color: item.color }}>{item.value}</div>
-              {item.sub && <div style={{ fontSize: 7, color: "#2a3038" }}>{item.sub}</div>}
+              {item.sub && <div style={{ fontSize: 7, color: "#4a5058" }}>{item.sub}</div>}
             </div>
           ))}
         </div>
-        <div style={{ marginTop: 8, fontSize: 8, color: "#2a3038", lineHeight: 1.5 }}>
+        <div style={{ marginTop: 8, fontSize: 8, color: "#6a7078", lineHeight: 1.5 }}>
           TIP: Rapidly tap a single key as fast as possible for 10+ seconds. The tool needs 50+ events for classification. Sub-10ms holds and near-instant re-activation are physically impossible on mechanical switches.
         </div>
       </div>
@@ -688,7 +695,7 @@ export default function KeyboardTester() {
                         </div>
                       );
                     })}
-                    <div style={{ fontSize: 8, color: "#2a3038", marginTop: 2 }}>
+                    <div style={{ fontSize: 8, color: "#556068", marginTop: 2 }}>
                       σ = {ds.holdStdDev > 0 ? ds.holdStdDev.toFixed(1) : "—"}ms &nbsp; avg = {ds.avgHold > 0 ? ds.avgHold.toFixed(1) : "—"}ms
                     </div>
                   </div>
@@ -710,7 +717,7 @@ export default function KeyboardTester() {
                 <div>Ghost events: <span style={{ color: ds.ghostEvents > 0 ? "#ff5555" : "#c0c8d0" }}>{ds.ghostEvents}</span></div>
               </div>
             </div>
-            <div style={{ fontSize: 8, color: "#2a3038", marginTop: 2, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 8, color: "#556068", marginTop: 2, lineHeight: 1.5 }}>
               Re-activation = time from releasing a key to pressing the same key again. Mechanical keyboards need {">"}25ms (physical reset travel). Rapid trigger can re-actuate in {"<"}5ms.
             </div>
 
@@ -723,7 +730,7 @@ export default function KeyboardTester() {
                     <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 3, background: SIGNAL_COLORS[sig.supports], marginTop: 4, flexShrink: 0 }} />
                     <div>
                       <span style={{ color: SIGNAL_COLORS[sig.supports], fontWeight: 600 }}>{sig.name}</span>
-                      <span style={{ color: "#3a4048" }}> — {sig.finding}</span>
+                      <span style={{ color: "#5a6068" }}> — {sig.finding}</span>
                     </div>
                   </div>
                 ))}
@@ -732,7 +739,7 @@ export default function KeyboardTester() {
 
             {/* How to test */}
             <div style={{ marginTop: 12, color: "#3a4048", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>HOW TO TEST</div>
-            <div style={{ fontSize: 9, color: "#3a4048", lineHeight: 1.7 }}>
+            <div style={{ fontSize: 9, color: "#5a6068", lineHeight: 1.7 }}>
               1. Tap a single key as fast as possible for 10+ sec — measures hold floor, re-activation speed, and tap rate<br />
               2. Press and hold 6+ keys simultaneously — tests N-key rollover (NKRO)<br />
               3. Focus on minimal finger movement during rapid tapping — rapid trigger keyboards show sub-10ms holds<br />
@@ -762,7 +769,7 @@ export default function KeyboardTester() {
                     });
                   })()}
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#2a3038", marginTop: 4, padding: "0 4px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#4a5058", marginTop: 4, padding: "0 4px" }}>
                   <span>← older</span>
                   <span>Last 100 keydown intervals — shorter bars = faster tapping</span>
                   <span>newer →</span>
@@ -790,7 +797,7 @@ export default function KeyboardTester() {
 
       {/* Disclaimer */}
       <div style={{ marginTop: 8, fontSize: 8, color: "#1a1e22", textAlign: "center", maxWidth: 820, lineHeight: 1.5 }}>
-        Browser event timing is limited to ~1-4ms resolution. Classification uses behavioral heuristics from key event patterns, not direct hardware access. For definitive results, use native USB protocol analysis. Export your data with EXPORT for detailed offline analysis.
+        Browser event timing is limited to ~1-4ms resolution. Classification uses behavioral heuristics from key event patterns, not direct hardware access. For definitive results, use native USB protocol analysis. Export your data with EXPORT for detailed offline analysis. Privacy: all processing happens entirely in your browser — no keystroke data is collected, transmitted, or stored on any server. Exported files are saved locally to your device only.
       </div>
     </div>
   );
