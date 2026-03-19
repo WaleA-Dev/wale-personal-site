@@ -152,7 +152,7 @@ interface InternalStats {
 interface ClassSignal {
   name: string;
   finding: string;
-  supports: "rapid_trigger" | "magnetic" | "mechanical" | "membrane" | "neutral";
+  supports: "rapid_trigger" | "magnetic" | "mechanical" | "membrane" | "scissor" | "neutral";
 }
 
 interface Classification {
@@ -221,7 +221,7 @@ function classifySwitch(m: {
   }
 
   const signals: ClassSignal[] = [];
-  let rt = 0, mag = 0, mech = 0, mem = 0;
+  let rt = 0, mag = 0, mech = 0, mem = 0, sc = 0;
 
   // ── Signal 1: NKRO (weight up to 3.0) ──────────────────────
   // HARDWARE signal — membrane matrix physically limits simultaneous keys.
@@ -359,9 +359,39 @@ function classifySwitch(m: {
     mag += 0.3;
   }
 
+  // ── Signal 9: Scissor / Low-Profile Detection (compound) ──
+  // Scissor switches (laptop keyboards) have a unique fingerprint:
+  // moderate hold (42-65ms) + fast reactivation (<35ms React Min).
+  // Traditional membrane rubber domes need 55ms+ to reform, but
+  // scissor's tiny ~1mm-travel dome snaps back much faster.
+  if (m.holdCount >= 10 && m.reactCount >= 3 && !isNaN(m.holdP5) && m.reactMin < Infinity) {
+    const p5 = m.holdP5;
+    const isScissorHoldRange = p5 >= 42 && p5 <= 65;
+    const isScissorReactMin = m.reactMin < 35;
+    const isScissorReactP5 = !isNaN(m.reactP5) && m.reactP5 < 80;
+
+    if (isScissorHoldRange && isScissorReactMin) {
+      signals.push({
+        name: "Scissor Switch Signature",
+        finding: `Hold P5 = ${p5.toFixed(1)}ms (42-65ms range) with React Min = ${m.reactMin.toFixed(1)}ms (<35ms) — rubber domes need 55ms+ to reform, but scissor switches have tiny domes with ~1mm travel allowing much faster reactivation`,
+        supports: "scissor",
+      });
+      sc += 1.5;
+
+      if (isScissorReactP5) {
+        signals.push({
+          name: "Scissor Reactivation Profile",
+          finding: `React P5 = ${m.reactP5.toFixed(1)}ms (<80ms) — consistent with low-profile scissor mechanism, faster than membrane (typically 85ms+)`,
+          supports: "scissor",
+        });
+        sc += 1.0;
+      }
+    }
+  }
+
   // ── Verdict ────────────────────────────────────────────────
-  const total = rt + mag + mech + mem;
-  const maxScore = Math.max(rt, mag, mech, mem);
+  const total = rt + mag + mech + mem + sc;
+  const maxScore = Math.max(rt, mag, mech, mem, sc);
   const conclusive = signals.length >= 2 || maxScore >= 2.5 || (total >= 1.5 && signals.length >= 1);
 
   if (!conclusive) {
@@ -383,10 +413,12 @@ function classifySwitch(m: {
   const conf: "HIGH" | "MEDIUM" | "LOW" =
     dominance > 0.5 && dataRich && total >= 2.0 ? "HIGH" : dominance > 0.35 ? "MEDIUM" : "LOW";
 
-  if (rt >= mag && rt >= mech && rt >= mem) {
+  if (rt >= mag && rt >= mech && rt >= mem && rt >= sc) {
     return { verdict: "RAPID TRIGGER", confidence: conf, description: "Magnetic hall-effect switches with rapid trigger enabled. Ultra-short holds and near-instant re-activation detected — physically impossible on mechanical or membrane.", signals };
-  } else if (mag >= mech && mag >= mem) {
+  } else if (mag >= mech && mag >= mem && mag >= sc) {
     return { verdict: "LIKELY MAGNETIC", confidence: conf, description: "Characteristics consistent with magnetic hall-effect switches. Clean timing, short hold durations, and no contact bounce artifacts.", signals };
+  } else if (sc >= mech && sc >= mem) {
+    return { verdict: "LIKELY SCISSOR", confidence: conf, description: "Characteristics consistent with scissor (low-profile) switches, typically found in laptop keyboards. Moderate hold times with fast reactivation indicate a small rubber dome with minimal travel (~1mm).", signals };
   } else if (mem > mech) {
     return { verdict: "LIKELY MEMBRANE", confidence: conf, description: "Characteristics consistent with membrane (rubber dome) keyboard. Limited key rollover, elevated hold durations, and slower re-activation indicate rubber dome construction.", signals };
   } else {
@@ -402,12 +434,13 @@ const VERDICT_COLORS: Record<string, string> = {
   "RAPID TRIGGER": "#ff44cc",
   "LIKELY MAGNETIC": "#44aaff",
   "LIKELY MECHANICAL": "#ffaa44",
+  "LIKELY SCISSOR": "#b388ff",
   "LIKELY MEMBRANE": "#22ccaa",
   "INCONCLUSIVE": "#888888",
   "NEED MORE DATA": "#555555",
 };
 const SIGNAL_COLORS: Record<string, string> = {
-  rapid_trigger: "#ff44cc", magnetic: "#44aaff", mechanical: "#ffaa44", membrane: "#22ccaa", neutral: "#555555",
+  rapid_trigger: "#ff44cc", magnetic: "#44aaff", mechanical: "#ffaa44", membrane: "#22ccaa", scissor: "#b388ff", neutral: "#555555",
 };
 
 function createFreshStats(): InternalStats {
@@ -952,8 +985,9 @@ export default function KeyboardTester() {
         {/* Quick metrics */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 8 }}>
           {[
-            { label: "HOLD P5", value: fmtP(ds.holdP5), sub: "ms", color: ds.holdP5 < 10 ? "#ff44cc" : ds.holdP5 < 25 ? "#44aaff" : ds.holdP5 < 42 ? "#ffaa44" : "#d4d4d8" },
+            { label: "HOLD P5", value: fmtP(ds.holdP5), sub: "ms", color: ds.holdP5 < 10 ? "#ff44cc" : ds.holdP5 < 25 ? "#44aaff" : ds.holdP5 < 42 ? "#ffaa44" : ds.holdP5 <= 65 ? "#b388ff" : "#d4d4d8" },
             { label: "REACT P5", value: fmtP(ds.reactP5), sub: "ms", color: ds.reactP5 < 10 ? "#ff44cc" : ds.reactP5 < 25 ? "#44aaff" : "#d4d4d8" },
+            { label: "REACT MIN", value: ds.reactMin < Infinity ? ds.reactMin.toFixed(1) : EMPTY, sub: "ms", color: ds.reactMin < 15 ? "#ff44cc" : ds.reactMin < 35 ? "#b388ff" : ds.reactMin < 55 ? "#44aaff" : "#d4d4d8" },
             { label: "MICRO%", value: ds.totalKeyups > 0 ? `${(ds.microRatio * 100).toFixed(1)}` : EMPTY, sub: `<${MICRO_RELEASE_MS}ms`, color: ds.microRatio > 0.2 ? "#ff44cc" : ds.microRatio > 0.05 ? "#44aaff" : "#52525b" },
             { label: "TAP RATE", value: ds.maxTapRate > 0 ? ds.maxTapRate.toFixed(1) : EMPTY, sub: "taps/sec", color: ds.maxTapRate > 30 ? "#ff44cc" : ds.maxTapRate > 18 ? "#44aaff" : "#d4d4d8" },
             { label: "AVG HOLD", value: ds.avgHold > 0 ? ds.avgHold.toFixed(1) : EMPTY, sub: "ms", color: "#d4d4d8" },
