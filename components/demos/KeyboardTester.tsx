@@ -209,6 +209,7 @@ function classifySwitch(m: {
   ghostEvents: number; totalEvents: number; totalKeyups: number;
   holdCount: number; reactCount: number;
   nkroMax: number; testedKeys: number;
+  maxSingleKeyPresses: number;
 }): Classification {
   if (m.totalEvents < 50) {
     return {
@@ -265,8 +266,8 @@ function classifySwitch(m: {
       // normal typing. Don't assign to any category.
       signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — ambiguous range (42-55ms). All switch types produce this during normal typing. Complete the rollover test for a definitive answer.`, supports: "neutral" });
     } else if (p5 < 65) {
-      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — elevated hold floor, leans toward rubber dome membrane actuation`, supports: "membrane" });
-      mem += 0.5;
+      // Only weak membrane signal — and only if not just normal slow typing
+      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — slightly elevated, could indicate rubber dome. Complete the rollover and rapid tap tests for a definitive answer.`, supports: "neutral" });
     } else {
       signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — high hold floor, typical of membrane rubber dome keyboards`, supports: "membrane" });
       mem += 1.0;
@@ -274,8 +275,14 @@ function classifySwitch(m: {
   }
 
   // ── Signal 3: Same-key Re-activation P5 (weight up to 1.5) ──
-  // Below 20ms is reliably magnetic. Above 100ms is reliably slow (membrane).
-  // The 20-100ms zone is dominated by TYPING SPEED, not switch physics.
+  // Below 20ms is reliably magnetic (hardware capability).
+  // Above 100ms COULD indicate membrane, but ONLY if the user was doing
+  // deliberate rapid tapping. During normal typing, everyone's react P5
+  // is slow — it reflects typing cadence, not switch limitations.
+    // Did the user do focused rapid tapping on a single key?
+  // 30+ presses on one key is strong evidence of deliberate testing,
+  // not just frequent use of a common letter during typing.
+  const didRapidTap = m.maxSingleKeyPresses >= 30;
   if (m.reactCount >= 5 && !isNaN(m.reactP5)) {
     const rp5 = m.reactP5;
     if (rp5 < 8) {
@@ -284,17 +291,17 @@ function classifySwitch(m: {
     } else if (rp5 < 20) {
       signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — very fast re-activation, below mechanical spring reset time`, supports: "magnetic" });
       mag += 1.5;
-    } else if (rp5 >= 100) {
-      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — slow re-activation, consistent with rubber dome rebound delay`, supports: "membrane" });
+    } else if (rp5 >= 100 && didRapidTap) {
+      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — slow re-activation during rapid tapping, consistent with rubber dome rebound delay`, supports: "membrane" });
       mem += 1.0;
     }
-    // 20-100ms is neutral — typing speed, not switch type
   }
 
   // ── Signal 4: Re-activation Floor (weight up to 2.5) ──────
-  // HARDWARE signal — the absolute fastest same-key re-activation.
-  // Membrane domes physically cannot reform faster than ~55ms.
-  // This is a hard physical constraint, not behavioral.
+  // The fastest same-key re-activation. Membrane domes physically cannot
+  // reform faster than ~55ms — BUT this is only meaningful when the user
+  // was TRYING to tap fast. During normal typing, react min just reflects
+  // typing speed. Gate on rapid-tap evidence (30+ presses on one key).
   if (m.reactCount >= 3 && m.reactMin < Infinity) {
     if (m.reactMin < 5) {
       signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — near-instant, only possible with rapid trigger`, supports: "rapid_trigger" });
@@ -302,11 +309,12 @@ function classifySwitch(m: {
     } else if (m.reactMin < 15) {
       signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — very fast minimum, consistent with magnetic switches`, supports: "magnetic" });
       mag += 1.0;
-    } else if (m.reactMin > 55) {
-      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — rubber dome membranes physically cannot reset faster than ~55ms. This is a hardware constraint.`, supports: "membrane" });
+    } else if (m.reactMin > 55 && didRapidTap) {
+      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms during rapid tapping — rubber dome membranes physically cannot reset faster than ~55ms`, supports: "membrane" });
       mem += 2.5;
+    } else if (m.reactMin > 55 && !didRapidTap) {
+      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — but no rapid-tap data yet. Tap a single key 30+ times rapidly for this signal to be meaningful.`, supports: "neutral" });
     }
-    // 15-55ms is neutral
   }
 
   // ── Signal 5: Micro-release Ratio (weight up to 2.5) ──────
@@ -441,7 +449,7 @@ function createEmptyDisplayStats(): DisplayStats {
     reactP5: NaN, reactMin: Infinity,
     microRatio: 0, maxTapRate: 0,
     ghostEvents: 0, totalEvents: 0, totalKeyups: 0,
-    holdCount: 0, reactCount: 0, nkroMax: 0, testedKeys: 0,
+    holdCount: 0, reactCount: 0, nkroMax: 0, testedKeys: 0, maxSingleKeyPresses: 0,
   });
   return {
     avgRate: 0, peakRate: 0, minInterval: Infinity, maxInterval: 0, jitter: 0,
@@ -537,6 +545,7 @@ export default function KeyboardTester() {
       totalEvents: s.totalEvents, totalKeyups: s.totalKeyups,
       holdCount: holds.length, reactCount: s.reactivationGaps.length,
       nkroMax: s.nkroMax, testedKeys: s.testedKeys.size,
+      maxSingleKeyPresses: s.maxSingleKeyPresses,
     });
 
     const elapsedMinutes = s.typingStartTime !== null ? (now - s.typingStartTime) / 60000 : 0;
@@ -813,7 +822,7 @@ export default function KeyboardTester() {
   // Test checklist state
   const testChecks = [
     { done: ds.totalEvents >= 50, label: "Basic typing (50+ events)" },
-    { done: ds.maxSingleKeyPresses >= 20, label: "Single-key rapid tap (20+ on one key)" },
+    { done: ds.maxSingleKeyPresses >= 30, label: "Single-key rapid tap (30+ on one key)" },
     { done: ds.nkroMax >= 6, label: "Rollover test (press 6+ keys at once)" },
     { done: ds.testedCount >= 8, label: "Key diversity (8+ unique keys)" },
   ];
