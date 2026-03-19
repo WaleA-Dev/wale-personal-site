@@ -6,7 +6,7 @@ const demos = [
   {
     title: "Keyboard Diagnostics",
     description:
-      "Test your keyboard's performance characteristics. Measures event timing, hold durations, N-key rollover, and analyzes whether your switches might be magnetic or mechanical.",
+      "See how fast your keyboard responds, how long you hold keys, and how many you can press at once. It also guesses whether you're typing on mechanical, membrane, or magnetic switches.",
     href: "/projects/keyboard-tester",
     tags: ["Interactive", "Hardware"],
     icon: (
