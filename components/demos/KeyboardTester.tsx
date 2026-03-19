@@ -223,8 +223,9 @@ function classifySwitch(m: {
   let rt = 0, mag = 0, mech = 0, mem = 0;
 
   // ── Signal 1: NKRO (weight up to 3.0) ──────────────────────
-  // Most reliable hardware signal. Membrane matrix design physically
-  // limits simultaneous key registration. This is NOT behavioral.
+  // HARDWARE signal — membrane matrix physically limits simultaneous keys.
+  // This is the single most reliable differentiator because it's not
+  // affected by typing speed or behavior.
   if (m.testedKeys >= 6) {
     if (m.nkroMax <= 3) {
       signals.push({ name: "Key Rollover", finding: `Max ${m.nkroMax} simultaneous keys — strong indicator of membrane matrix. Mechanical/magnetic keyboards register 6+ simultaneously.`, supports: "membrane" });
@@ -242,6 +243,10 @@ function classifySwitch(m: {
   }
 
   // ── Signal 2: Hold Duration Floor — P5 (weight up to 2.0) ──
+  // Below 42ms is reliably mechanical/magnetic (physical springs or hall-effect).
+  // 42-55ms is an AMBIGUOUS ZONE — all keyboard types produce these during
+  // normal typing. Only claim membrane above 55ms where rubber dome physics
+  // creates a measurable floor.
   if (m.holdCount >= 10 && !isNaN(m.holdP5)) {
     const p5 = m.holdP5;
     if (p5 < 8) {
@@ -255,16 +260,22 @@ function classifySwitch(m: {
     } else if (p5 < 42) {
       signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — consistent with mechanical switch spring travel (~2mm + debounce)`, supports: "mechanical" });
       mech += 1.5;
+    } else if (p5 < 55) {
+      // AMBIGUOUS ZONE: 42-55ms. All switch types produce this during
+      // normal typing. Don't assign to any category.
+      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — ambiguous range (42-55ms). All switch types produce this during normal typing. Complete the rollover test for a definitive answer.`, supports: "neutral" });
     } else if (p5 < 65) {
-      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — elevated hold floor, consistent with rubber dome membrane actuation`, supports: "membrane" });
-      mem += 1.5;
+      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — elevated hold floor, leans toward rubber dome membrane actuation`, supports: "membrane" });
+      mem += 0.5;
     } else {
       signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — high hold floor, typical of membrane rubber dome keyboards`, supports: "membrane" });
-      mem += 1.5;
+      mem += 1.0;
     }
   }
 
   // ── Signal 3: Same-key Re-activation P5 (weight up to 1.5) ──
+  // Below 20ms is reliably magnetic. Above 100ms is reliably slow (membrane).
+  // The 20-100ms zone is dominated by TYPING SPEED, not switch physics.
   if (m.reactCount >= 5 && !isNaN(m.reactP5)) {
     const rp5 = m.reactP5;
     if (rp5 < 8) {
@@ -273,15 +284,17 @@ function classifySwitch(m: {
     } else if (rp5 < 20) {
       signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — very fast re-activation, below mechanical spring reset time`, supports: "magnetic" });
       mag += 1.5;
-    } else if (rp5 >= 85) {
-      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — slow re-activation, rubber dome membranes need longer to reform`, supports: "membrane" });
-      mem += 1.5;
-    } else if (rp5 >= 50) {
-      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — moderate re-activation, consistent with mechanical spring reset or normal typing`, supports: "neutral" });
+    } else if (rp5 >= 100) {
+      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — slow re-activation, consistent with rubber dome rebound delay`, supports: "membrane" });
+      mem += 1.0;
     }
+    // 20-100ms is neutral — typing speed, not switch type
   }
 
-  // ── Signal 4: Re-activation Floor (weight up to 1.5) ──────
+  // ── Signal 4: Re-activation Floor (weight up to 2.5) ──────
+  // HARDWARE signal — the absolute fastest same-key re-activation.
+  // Membrane domes physically cannot reform faster than ~55ms.
+  // This is a hard physical constraint, not behavioral.
   if (m.reactCount >= 3 && m.reactMin < Infinity) {
     if (m.reactMin < 5) {
       signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — near-instant, only possible with rapid trigger`, supports: "rapid_trigger" });
@@ -290,9 +303,10 @@ function classifySwitch(m: {
       signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — very fast minimum, consistent with magnetic switches`, supports: "magnetic" });
       mag += 1.0;
     } else if (m.reactMin > 55) {
-      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — high minimum re-activation, rubber domes physically need >50ms to reform`, supports: "membrane" });
-      mem += 1.5;
+      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — rubber dome membranes physically cannot reset faster than ~55ms. This is a hardware constraint.`, supports: "membrane" });
+      mem += 2.5;
     }
+    // 15-55ms is neutral
   }
 
   // ── Signal 5: Micro-release Ratio (weight up to 2.5) ──────
@@ -306,7 +320,6 @@ function classifySwitch(m: {
       signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% micro-releases detected — consistent with magnetic hall-effect switches`, supports: "magnetic" });
       mag += 1.5;
     }
-    // < 5% is neutral — both mechanical and membrane have physical travel constraints
   }
 
   // ── Signal 6: Ghost / Bounce Events (weight up to 1.0) ────
@@ -329,8 +342,7 @@ function classifySwitch(m: {
   }
 
   // ── Signal 8: Peak Tap Rate (weight up to 0.5) ────────────
-  // Only significant at high extremes. Low tap rate is NOT a reliable
-  // indicator — it depends on typing speed, not switch technology.
+  // Only significant at high extremes. Low tap rate is NOT reliable.
   if (m.maxTapRate > 30) {
     signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — exceeds mechanical/membrane physical limits (~20/sec), rapid trigger territory`, supports: "rapid_trigger" });
     rt += 0.5; mag += 0.3;
@@ -341,20 +353,27 @@ function classifySwitch(m: {
 
   // ── Verdict ────────────────────────────────────────────────
   const total = rt + mag + mech + mem;
-  if (total === 0 || signals.length < 2) {
+  const maxScore = Math.max(rt, mag, mech, mem);
+  const conclusive = signals.length >= 2 || maxScore >= 2.5 || (total >= 1.5 && signals.length >= 1);
+
+  if (!conclusive) {
+    // Build specific guidance based on what's missing
+    const hints: string[] = [];
+    if (m.nkroMax < 6 || m.testedKeys < 6) hints.push("press 6+ keys simultaneously to test rollover");
+    if (m.holdCount < 30 || m.reactCount < 10) hints.push("rapidly tap a single key for 10+ seconds");
+    if (hints.length === 0) hints.push("try rapid trigger micro-tapping if your keyboard supports it");
     return {
       verdict: "INCONCLUSIVE",
       confidence: "LOW",
-      description: "Not enough distinguishing signals. Rapidly tap a single key for 10+ seconds, then press 6+ keys simultaneously to test rollover.",
+      description: `Classification is ambiguous with current data. During normal typing, mechanical and magnetic keyboards produce similar patterns. To get a definitive result: ${hints.join("; ")}.`,
       signals,
     };
   }
 
-  const maxScore = Math.max(rt, mag, mech, mem);
   const dominance = maxScore / total;
   const dataRich = m.totalEvents >= 100 && m.holdCount >= 30;
   const conf: "HIGH" | "MEDIUM" | "LOW" =
-    dominance > 0.5 && dataRich ? "HIGH" : dominance > 0.35 ? "MEDIUM" : "LOW";
+    dominance > 0.5 && dataRich && total >= 2.0 ? "HIGH" : dominance > 0.35 ? "MEDIUM" : "LOW";
 
   if (rt >= mag && rt >= mech && rt >= mem) {
     return { verdict: "RAPID TRIGGER", confidence: conf, description: "Magnetic hall-effect switches with rapid trigger enabled. Ultra-short holds and near-instant re-activation detected — physically impossible on mechanical or membrane.", signals };
