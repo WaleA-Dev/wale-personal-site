@@ -81,7 +81,7 @@ export default function ProjectGrid() {
                         background: langColors[project.language] || "#888",
                       }}
                     />
-                    <span className="text-xs text-dim">
+                    <span className="text-xs text-muted">
                       {project.language}
                     </span>
                   </div>

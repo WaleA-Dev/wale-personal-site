@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 
+
 export default function Navigation() {
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
@@ -68,13 +69,16 @@ export default function Navigation() {
           >
             Projects
           </Link>
-          <a
-            href="/resume.pdf"
-            download="Adewale-Adekambi-Resume.pdf"
-            className="text-sm tracking-wide text-dim hover:text-muted transition-colors duration-300"
+          <Link
+            href="/resume"
+            className={`text-sm tracking-wide transition-colors duration-300 ${
+              pathname === "/resume"
+                ? "text-foreground"
+                : "text-dim hover:text-muted"
+            }`}
           >
             Resume
-          </a>
+          </Link>
 
           <button
             onClick={toggleTheme}

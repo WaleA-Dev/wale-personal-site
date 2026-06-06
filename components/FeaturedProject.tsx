@@ -147,7 +147,7 @@ export default function FeaturedProject() {
             {tags.map((tag) => (
               <span
                 key={tag}
-                className="text-xs text-dim border border-subtle rounded-full px-4 py-1.5 tracking-wide"
+                className="text-xs text-muted bg-surface border border-muted/20 rounded-full px-4 py-1.5 tracking-wide"
               >
                 {tag}
               </span>

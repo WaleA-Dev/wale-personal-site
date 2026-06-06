@@ -8,11 +8,8 @@ export default function Home() {
   return (
     <main>
       <Hero />
-      <div className="section-divider max-w-5xl mx-auto" />
       <About />
-      <div className="section-divider max-w-5xl mx-auto" />
       <FeaturedProject />
-      <div className="section-divider max-w-5xl mx-auto" />
       <ProjectGrid />
       <Footer />
     </main>

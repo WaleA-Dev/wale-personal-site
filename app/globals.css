@@ -71,6 +71,7 @@ html.light::-webkit-scrollbar-thumb:hover { background: #a8a49e; }
 /* ─── Hero grid ───────────────────────────────────────────────────────────── */
 .hero-grid {
   background-size: 60px 60px;
+  background-position: 0 30px; /* offset so first line isn't flush with top edge */
   background-image:
     linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
@@ -80,8 +81,8 @@ html.light::-webkit-scrollbar-thumb:hover { background: #a8a49e; }
 
 html.light .hero-grid {
   background-image:
-    linear-gradient(to right, rgba(0,0,0,0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(0,0,0,0.06) 1px, transparent 1px);
+    linear-gradient(to right, rgba(0,0,0,0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0,0,0,0.05) 1px, transparent 1px);
 }
 
 /* ─── Hero glow ───────────────────────────────────────────────────────────── */
