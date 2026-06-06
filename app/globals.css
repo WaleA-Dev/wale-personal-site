@@ -1,47 +1,52 @@
 @import "tailwindcss";
 
-@theme inline {
+/* Colors — @theme (no inline) so utilities emit var() and light mode overrides work */
+@theme {
   --color-background: #030303;
   --color-foreground: #ededed;
-  --color-surface: #080808;
+  --color-surface: #0a0a0a;
   --color-muted: #a0a0a0;
   --color-dim: #777777;
   --color-subtle: #1a1a1a;
   --color-gold: #c0a36e;
+}
+
+/* Fonts — @theme inline so utilities reference the Next.js font CSS vars directly */
+@theme inline {
   --font-heading: var(--font-instrument-serif);
   --font-body: var(--font-dm-sans);
   --font-mono: var(--font-jetbrains-mono);
 }
 
-/* Gold accent vars for themed components */
+/* Gold accent vars (used via style prop, not Tailwind) */
 :root {
   --gold-bg: #16120a;
   --gold-border: #2a2218;
 }
 
-/* Light theme — overrides Tailwind CSS vars at runtime */
+/* ─── Light theme ─────────────────────────────────────────────────────────── */
 html.light {
   --color-background: #f7f6f3;
   --color-foreground: #141210;
-  --color-surface: #edece9;
-  --color-muted: #5a5754;
+  --color-surface: #eceae6;
+  --color-muted: #56524e;
   --color-dim: #8a8784;
-  --color-subtle: #dedad5;
-  --color-gold: #8a6a2e;
-  --gold-bg: #f5efe4;
-  --gold-border: #d4c4a0;
+  --color-subtle: #d9d5d0;
+  --color-gold: #7a5c20;
+  --gold-bg: #f5ede0;
+  --gold-border: #d4bea0;
 }
 
+/* ─── Base ────────────────────────────────────────────────────────────────── */
 html {
   scroll-behavior: smooth;
   scrollbar-width: thin;
   scrollbar-color: #1a1a1a #030303;
-  /* Prevents white flash on overscroll / fast scroll */
-  background: var(--color-background);
+  background: var(--color-background); /* prevents white flash on overscroll */
 }
 
 html.light {
-  scrollbar-color: #dedad5 #f7f6f3;
+  scrollbar-color: #d9d5d0 #f7f6f3;
 }
 
 body {
@@ -51,84 +56,51 @@ body {
 }
 
 ::selection {
-  background-color: rgba(192, 163, 110, 0.3);
+  background-color: rgba(192, 163, 110, 0.25);
   color: var(--color-foreground);
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-}
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--color-background); }
+::-webkit-scrollbar-thumb { background: #1a1a1a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2a2a2a; }
 
-::-webkit-scrollbar-track {
-  background: var(--color-background);
-}
+html.light::-webkit-scrollbar-thumb { background: #c8c4be; }
+html.light::-webkit-scrollbar-thumb:hover { background: #a8a49e; }
 
-::-webkit-scrollbar-thumb {
-  background: #1a1a1a;
-  border-radius: 3px;
-}
-
-html.light::-webkit-scrollbar-thumb {
-  background: #dedad5;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #2a2a2a;
-}
-
-html.light::-webkit-scrollbar-thumb:hover {
-  background: #c8c4be;
-}
-
-/* Hero animated grid background */
+/* ─── Hero grid ───────────────────────────────────────────────────────────── */
 .hero-grid {
   background-size: 60px 60px;
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  mask-image: radial-gradient(
-    ellipse 80% 50% at 50% 0%,
-    rgba(0, 0, 0, 0.6),
-    transparent
-  );
-  -webkit-mask-image: radial-gradient(
-    ellipse 80% 50% at 50% 0%,
-    rgba(0, 0, 0, 0.6),
-    transparent
-  );
+    linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
+  mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(0,0,0,0.6), transparent);
+  -webkit-mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(0,0,0,0.6), transparent);
 }
 
 html.light .hero-grid {
   background-image:
-    linear-gradient(to right, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+    linear-gradient(to right, rgba(0,0,0,0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0,0,0,0.06) 1px, transparent 1px);
 }
 
-/* Warm glow behind hero content */
+/* ─── Hero glow ───────────────────────────────────────────────────────────── */
 .hero-glow {
-  background: radial-gradient(
-    ellipse 50% 80% at 50% 20%,
-    rgba(192, 163, 110, 0.05),
-    transparent
-  );
+  background: radial-gradient(ellipse 50% 80% at 50% 20%, rgba(192,163,110,0.05), transparent);
   pointer-events: none;
 }
 
 html.light .hero-glow {
-  background: radial-gradient(
-    ellipse 50% 80% at 50% 20%,
-    rgba(138, 106, 46, 0.08),
-    transparent
-  );
+  background: radial-gradient(ellipse 50% 80% at 50% 20%, rgba(122,92,32,0.07), transparent);
 }
 
-/* Section divider line */
+/* ─── Section divider ─────────────────────────────────────────────────────── */
 .section-divider {
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--color-subtle) 50%, transparent);
 }
 
-/* Gradient text for the hero name */
+/* ─── Hero name gradient ──────────────────────────────────────────────────── */
 .name-gradient {
   background: linear-gradient(180deg, #ffffff 0%, #d4cbbf 100%);
   -webkit-background-clip: text;
@@ -137,47 +109,37 @@ html.light .hero-glow {
 }
 
 html.light .name-gradient {
-  background: linear-gradient(180deg, #141210 0%, #4a4643 100%);
+  background: linear-gradient(180deg, #0e0c0a 0%, #3d3a37 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Subtle glow on project cards */
+/* ─── Card glow ───────────────────────────────────────────────────────────── */
 .card-glow {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   opacity: 0;
   transition: opacity 0.4s ease;
-  background: radial-gradient(
-    circle at 50% 50%,
-    rgba(192, 163, 110, 0.04),
-    transparent 70%
-  );
+  background: radial-gradient(circle at 50% 50%, rgba(192,163,110,0.05), transparent 70%);
   pointer-events: none;
 }
 
-.group:hover .card-glow {
-  opacity: 1;
-}
+.group:hover .card-glow { opacity: 1; }
 
 html.light .card-glow {
-  background: radial-gradient(
-    circle at 50% 50%,
-    rgba(138, 106, 46, 0.07),
-    transparent 70%
-  );
+  background: radial-gradient(circle at 50% 50%, rgba(122,92,32,0.07), transparent 70%);
 }
 
-/* Browser window dots */
+/* ─── Browser window dots ─────────────────────────────────────────────────── */
 .window-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
 }
 
-/* Blink animation for recording indicator */
+/* ─── Keyframes ───────────────────────────────────────────────────────────── */
 @keyframes blink {
   0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
@@ -189,5 +151,5 @@ html.light .card-glow {
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  50% { opacity: 0.35; }
 }
