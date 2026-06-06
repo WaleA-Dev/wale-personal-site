@@ -22,12 +22,12 @@ const awards = [
   {
     title: "Best Paper",
     event: "GDRKMCC-26 · West Point",
-    track: "Modeling & Simulation",
+    subtitle: "West Point Military Academy",
   },
   {
     title: "Best Paper",
     event: "SMDC-26 · George Mason",
-    track: "Systems Engineering",
+    subtitle: "",
   },
 ];
 
@@ -64,6 +64,9 @@ export default function FeaturedProject() {
                     {award.title}
                   </p>
                   <p className="text-dim text-xs">{award.event}</p>
+                  {award.subtitle && (
+                    <p className="text-dim text-xs">{award.subtitle}</p>
+                  )}
                 </div>
               </div>
             ))}
