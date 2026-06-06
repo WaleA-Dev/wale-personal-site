@@ -1,11 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import AnimatedSection from "./AnimatedSection";
 
 const tags = [
   "Dynamic Reorder Points",
   "Demand Forecasting",
   "Weather-Adjusted Models",
+  "SQL",
+  "REST APIs",
   "React + TypeScript",
   "Supabase",
   "Python",
@@ -43,11 +46,11 @@ export default function FeaturedProject() {
             CONVERGE
           </h2>
           <p className="text-muted text-base md:text-lg leading-relaxed max-w-2xl mb-8">
-            A dynamic inventory reorder system built for the Arlington County
-            Water Department. Replaced static reorder points with a model that
-            factors in part break history, material type, and weather patterns —
-            cutting annual stockouts by 95% and projecting $1.3M in yearly cost
-            savings.
+            Worked directly with the Arlington Water Department to design and
+            develop a dynamic reorder point model that factored in part break
+            history, material type, and weather patterns, replacing static
+            reorder points and cutting annual stockouts by 95% and projecting
+            $1.3M in yearly cost savings.
           </p>
         </AnimatedSection>
 
@@ -56,7 +59,11 @@ export default function FeaturedProject() {
             {awards.map((award) => (
               <div
                 key={award.event}
-                className="flex items-center gap-3 rounded-lg border border-[#2a2218] bg-[#16120a] px-4 py-3"
+                className="flex items-center gap-3 rounded-lg px-4 py-3"
+                style={{
+                  background: "var(--gold-bg)",
+                  border: "1px solid var(--gold-border)",
+                }}
               >
                 <span className="text-gold text-base leading-none">★</span>
                 <div>
@@ -91,6 +98,27 @@ export default function FeaturedProject() {
           </div>
         </AnimatedSection>
 
+        <AnimatedSection delay={0.25}>
+          <div className="rounded-xl overflow-hidden border border-subtle bg-surface shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)] mb-10">
+            <div className="flex items-center gap-2 px-4 py-3 bg-surface border-b border-subtle">
+              <span className="window-dot" style={{ background: "#ff5f57" }} />
+              <span className="window-dot" style={{ background: "#febc2e" }} />
+              <span className="window-dot" style={{ background: "#28c840" }} />
+              <span className="ml-3 text-xs text-dim font-mono">
+                converge.arlingtonwater.gov
+              </span>
+            </div>
+            <Image
+              src="/images/converge-dashboard.png"
+              alt="CONVERGE dashboard showing task coordination, predictive analytics, and parts management for Arlington Water Department"
+              width={1920}
+              height={1080}
+              className="w-full h-auto"
+              priority
+            />
+          </div>
+        </AnimatedSection>
+
         <AnimatedSection delay={0.3}>
           <div className="flex flex-wrap gap-3 mb-10">
             {tags.map((tag) => (
@@ -107,12 +135,12 @@ export default function FeaturedProject() {
         <AnimatedSection delay={0.1}>
           <div className="mt-2">
             <a
-              href="https://github.com/WaleA-Dev/CONVERGE---Arlington-Water-s-Dynamic-Reorder-System"
+              href="https://www.ieworldconference.org/content/WP2026/Papers/GDRKMCC26_37.pdf"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 text-sm text-muted hover:text-foreground transition-colors duration-300"
             >
-              View on GitHub
+              Read the Paper
               <svg
                 width="14"
                 height="14"

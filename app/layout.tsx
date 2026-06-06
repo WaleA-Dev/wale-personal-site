@@ -25,11 +25,11 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Wale Adekambi",
   description:
-    "Systems Engineering senior at George Mason University. Building trading infrastructure and backtesting tools.",
+    "Industrial & Systems Engineering grad from George Mason University. Building systems that solve real engineering problems.",
   openGraph: {
     title: "Wale Adekambi",
     description:
-      "Systems Engineering senior at George Mason University. Building trading infrastructure and backtesting tools.",
+      "Industrial & Systems Engineering grad from George Mason University. Building systems that solve real engineering problems.",
     type: "website",
   },
 };
@@ -40,7 +40,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Runs before React hydrates — prevents flash of wrong theme */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='light')document.documentElement.classList.add('light');}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body
         className={`${instrumentSerif.variable} ${dmSans.variable} ${jetbrainsMono.variable} antialiased`}
       >
