@@ -4,7 +4,6 @@ import Image from "next/image";
 import AnimatedSection from "./AnimatedSection";
 
 const tags = [
-  "Dynamic Reorder Points",
   "Demand Forecasting",
   "Weather-Adjusted Models",
   "SQL",
