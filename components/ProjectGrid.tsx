@@ -4,6 +4,13 @@ import AnimatedSection from "./AnimatedSection";
 
 const projects = [
   {
+    title: "Wale Backtest Engine",
+    description:
+      "PineScript \u2192 Python backtesting platform with a 4-step statistical validation pipeline. Ships as a Flask web app and Windows EXE.",
+    language: "Python",
+    url: "https://github.com/WaleA-Dev/wale-pinescript-engine",
+  },
+  {
     title: "Monte Carlo Engine",
     description:
       "Stress-test validated trades with 200K+ Monte Carlo simulations.",
@@ -11,15 +18,9 @@ const projects = [
     url: "https://github.com/WaleA-Dev/wale-montecarlo-engine",
   },
   {
-    title: "PineTS",
-    description:
-      "Open-source Pine Script transpiler \u2014 run TradingView logic in Node.js and the browser.",
-    language: "TypeScript",
-    url: "https://github.com/WaleA-Dev/PineTS-wale",
-  },
-  {
     title: "ECOWAS Energy Dataset",
-    description: "Energy dataset locator for West African nations.",
+    description:
+      "Energy dataset locator processing 1,000+ renewable energy records across 15 West African nations \u2014 built during a data analyst internship at ECREEE.",
     language: "Python",
     url: "https://github.com/WaleA-Dev/ECOWAS-Energy-Dataset-Locator",
   },

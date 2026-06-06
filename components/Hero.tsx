@@ -79,6 +79,28 @@ export default function Hero() {
             </svg>
             GitHub
           </a>
+          <a
+            href="/resume.pdf"
+            download="Adewale-Adekambi-Resume.pdf"
+            className="group/btn flex items-center gap-2.5 rounded-full border border-subtle px-6 py-2.5 text-sm text-muted hover:text-foreground hover:border-[#2a2a2a] transition-all duration-300"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="opacity-60 group-hover/btn:opacity-100 transition-opacity"
+            >
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Resume
+          </a>
         </motion.div>
       </div>
 

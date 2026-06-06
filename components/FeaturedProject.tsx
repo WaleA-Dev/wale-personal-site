@@ -1,13 +1,34 @@
 "use client";
 
-import Image from "next/image";
 import AnimatedSection from "./AnimatedSection";
 
-const features = [
-  "PineScript \u2192 Python",
-  "4-Step Validation",
-  "12 Built-in Strategies",
-  "Local-First",
+const tags = [
+  "Dynamic Reorder Points",
+  "Demand Forecasting",
+  "Weather-Adjusted Models",
+  "React + TypeScript",
+  "Supabase",
+  "Python",
+];
+
+const metrics = [
+  { value: "95%", label: "Stockout Reduction" },
+  { value: "$1.3M", label: "Projected Annual Savings" },
+  { value: "25", label: "Weekly Sprints" },
+  { value: "3", label: "Person Team" },
+];
+
+const awards = [
+  {
+    title: "Best Paper",
+    event: "GDRKMCC-26 · West Point",
+    track: "Modeling & Simulation",
+  },
+  {
+    title: "Best Paper",
+    event: "SMDC-26 · George Mason",
+    track: "Systems Engineering",
+  },
 ];
 
 export default function FeaturedProject() {
@@ -19,19 +40,57 @@ export default function FeaturedProject() {
             Featured Project
           </p>
           <h2 className="font-heading text-4xl md:text-5xl text-foreground mb-4">
-            Wale Backtest Engine
+            CONVERGE
           </h2>
           <p className="text-muted text-base md:text-lg leading-relaxed max-w-2xl mb-8">
-            A local backtesting platform that translates PineScript strategies
-            into Python, runs them against real market data, and validates results
-            through a 4-step statistical pipeline. Ships as both a Flask web app
-            and a standalone Windows EXE.
+            A dynamic inventory reorder system built for the Arlington County
+            Water Department. Replaced static reorder points with a model that
+            factors in part break history, material type, and weather patterns —
+            cutting annual stockouts by 95% and projecting $1.3M in yearly cost
+            savings.
           </p>
         </AnimatedSection>
 
-        <AnimatedSection delay={0.15}>
+        <AnimatedSection delay={0.1}>
           <div className="flex flex-wrap gap-3 mb-10">
-            {features.map((tag) => (
+            {awards.map((award) => (
+              <div
+                key={award.event}
+                className="flex items-center gap-3 rounded-lg border border-[#2a2218] bg-[#16120a] px-4 py-3"
+              >
+                <span className="text-gold text-base leading-none">★</span>
+                <div>
+                  <p className="text-foreground text-xs font-medium">
+                    {award.title}
+                  </p>
+                  <p className="text-dim text-xs">{award.event}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </AnimatedSection>
+
+        <AnimatedSection delay={0.2}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+            {metrics.map((m) => (
+              <div
+                key={m.label}
+                className="rounded-xl border border-subtle bg-surface p-6 text-center"
+              >
+                <p className="font-heading text-3xl md:text-4xl text-foreground mb-1">
+                  {m.value}
+                </p>
+                <p className="text-dim text-xs tracking-wide uppercase">
+                  {m.label}
+                </p>
+              </div>
+            ))}
+          </div>
+        </AnimatedSection>
+
+        <AnimatedSection delay={0.3}>
+          <div className="flex flex-wrap gap-3 mb-10">
+            {tags.map((tag) => (
               <span
                 key={tag}
                 className="text-xs text-dim border border-subtle rounded-full px-4 py-1.5 tracking-wide"
@@ -42,43 +101,10 @@ export default function FeaturedProject() {
           </div>
         </AnimatedSection>
 
-        <AnimatedSection delay={0.3}>
-          {/* Browser frame mockup */}
-          <div className="rounded-xl overflow-hidden border border-subtle bg-surface shadow-[0_20px_60px_-15px_rgba(0,0,0,0.6)]">
-            {/* Window chrome */}
-            <div className="flex items-center gap-2 px-4 py-3 bg-[#0c0c0c] border-b border-subtle">
-              <span
-                className="window-dot"
-                style={{ background: "#ff5f57" }}
-              />
-              <span
-                className="window-dot"
-                style={{ background: "#febc2e" }}
-              />
-              <span
-                className="window-dot"
-                style={{ background: "#28c840" }}
-              />
-              <span className="ml-3 text-xs text-dim font-mono">
-                127.0.0.1:5000
-              </span>
-            </div>
-            {/* Screenshot */}
-            <Image
-              src="/images/backtest-screenshot.png"
-              alt="Wale Backtest Engine dashboard showing summary metrics, trade analysis, and validation pipeline results"
-              width={1920}
-              height={1080}
-              className="w-full h-auto"
-              priority
-            />
-          </div>
-        </AnimatedSection>
-
         <AnimatedSection delay={0.1}>
-          <div className="mt-8">
+          <div className="mt-2">
             <a
-              href="https://github.com/WaleA-Dev/wale-pinescript-engine"
+              href="https://github.com/WaleA-Dev/CONVERGE---Arlington-Water-s-Dynamic-Reorder-System"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 text-sm text-muted hover:text-foreground transition-colors duration-300"
