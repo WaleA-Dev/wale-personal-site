@@ -1,9 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import AnimatedSection from "./AnimatedSection";
+import MiniBrowser from "./MiniBrowser";
 
 const tags = [
+  "Dynamic Reorder Points",
   "Demand Forecasting",
   "Weather-Adjusted Models",
   "SQL",
@@ -25,11 +26,19 @@ const awards = [
     title: "Best Paper",
     event: "GDRKMCC-26 · West Point",
     subtitle: "West Point Military Academy",
+    url: "https://www.ieworldconference.org/content/WP2026/Papers/GDRKMCC26_37.pdf",
   },
   {
     title: "Best Paper",
     event: "SMDC-26 · George Mason",
     subtitle: "",
+    url: "",
+  },
+  {
+    title: "Best Poster",
+    event: "STAR-TIDES 2026",
+    subtitle: "",
+    url: "https://star-tides.net/wp-content/uploads/2026/05/Poster_Predictive_Inventory.pdf",
   },
 ];
 
@@ -55,27 +64,41 @@ export default function FeaturedProject() {
 
         <AnimatedSection delay={0.1}>
           <div className="flex flex-wrap gap-3 mb-10">
-            {awards.map((award) => (
-              <div
-                key={award.event}
-                className="flex items-center gap-3 rounded-lg px-4 py-3"
-                style={{
-                  background: "var(--gold-bg)",
-                  border: "1px solid var(--gold-border)",
-                }}
-              >
-                <span className="text-gold text-base leading-none">★</span>
-                <div>
-                  <p className="text-foreground text-xs font-medium">
-                    {award.title}
-                  </p>
-                  <p className="text-dim text-xs">{award.event}</p>
-                  {award.subtitle && (
-                    <p className="text-dim text-xs">{award.subtitle}</p>
-                  )}
+            {awards.map((award) => {
+              const badge = (
+                <div
+                  className="flex items-center gap-3 rounded-lg px-4 py-3 transition-opacity duration-200 hover:opacity-80"
+                  style={{
+                    background: "var(--gold-bg)",
+                    border: "1px solid var(--gold-border)",
+                  }}
+                >
+                  <span className="text-gold text-base leading-none">★</span>
+                  <div>
+                    <p className="text-foreground text-xs font-medium">
+                      {award.title}
+                    </p>
+                    <p className="text-dim text-xs">{award.event}</p>
+                    {award.subtitle && (
+                      <p className="text-dim text-xs">{award.subtitle}</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+
+              return award.url ? (
+                <a
+                  key={award.event}
+                  href={award.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {badge}
+                </a>
+              ) : (
+                <div key={award.event}>{badge}</div>
+              );
+            })}
           </div>
         </AnimatedSection>
 
@@ -98,22 +121,23 @@ export default function FeaturedProject() {
         </AnimatedSection>
 
         <AnimatedSection delay={0.25}>
-          <div className="rounded-xl overflow-hidden border border-subtle bg-surface shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)] mb-10">
-            <div className="flex items-center gap-2 px-4 py-3 bg-surface border-b border-subtle">
-              <span className="window-dot" style={{ background: "#ff5f57" }} />
-              <span className="window-dot" style={{ background: "#febc2e" }} />
-              <span className="window-dot" style={{ background: "#28c840" }} />
-              <span className="ml-3 text-xs text-dim font-mono">
-                converge.arlingtonwater.gov
-              </span>
-            </div>
-            <Image
-              src="/images/converge-dashboard.png"
-              alt="CONVERGE dashboard showing task coordination, predictive analytics, and parts management for Arlington Water Department"
-              width={1920}
-              height={1080}
-              className="w-full h-auto"
-              priority
+          <div className="mb-2 flex items-center gap-2">
+            <span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{
+                background: "#28c840",
+                boxShadow: "0 0 5px #28c840",
+                animation: "pulse 2s ease-in-out infinite",
+              }}
+            />
+            <span className="text-xs text-dim tracking-[0.12em] uppercase">
+              Interactive Demo
+            </span>
+          </div>
+          <div className="mb-10">
+            <MiniBrowser
+              url="https://converge-arlington-water.vercel.app"
+              height={540}
             />
           </div>
         </AnimatedSection>
@@ -131,30 +155,28 @@ export default function FeaturedProject() {
           </div>
         </AnimatedSection>
 
-        <AnimatedSection delay={0.1}>
-          <div className="mt-2">
-            <a
-              href="https://www.ieworldconference.org/content/WP2026/Papers/GDRKMCC26_37.pdf"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-sm text-muted hover:text-foreground transition-colors duration-300"
+        <AnimatedSection delay={0.35}>
+          <a
+            href="https://www.ieworldconference.org/content/WP2026/Papers/GDRKMCC26_37.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 text-sm text-muted hover:text-foreground transition-colors duration-300"
+          >
+            Read the Paper
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             >
-              Read the Paper
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M7 17L17 7" />
-                <path d="M7 7h10v10" />
-              </svg>
-            </a>
-          </div>
+              <path d="M7 17L17 7" />
+              <path d="M7 7h10v10" />
+            </svg>
+          </a>
         </AnimatedSection>
       </div>
     </section>
