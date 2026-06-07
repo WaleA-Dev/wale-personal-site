@@ -962,11 +962,8 @@ export default function KeyboardTester() {
         if (isInteractiveElement(event.target)) return;
         requestAnimationFrame(() => { containerRef.current?.focus(); });
       }}
+      className="kt-panel"
       style={{
-        background: "#0a0a0a",
-        border: "1px solid #1e1e22",
-        borderRadius: 16,
-        padding: "24px 16px",
         color: "#d4d4d8",
         fontFamily: mono,
         display: "flex",

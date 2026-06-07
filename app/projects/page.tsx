@@ -52,7 +52,7 @@ export default function ProjectsPage() {
             <AnimatedSection key={demo.title} delay={0.1 + i * 0.1}>
               <Link
                 href={demo.href}
-                className="group relative block rounded-xl border border-subtle bg-surface p-8 h-full hover:border-[#2a2a2a] transition-all duration-300"
+                className="group relative block rounded-xl border border-subtle bg-surface p-8 h-full hover:border-muted/50 transition-all duration-300"
               >
                 <div className="card-glow" />
                 <div className="relative z-10">
@@ -68,7 +68,7 @@ export default function ProjectsPage() {
                       {demo.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="text-xs font-semibold text-foreground bg-surface border border-muted/30 rounded-full px-3 py-1.5"
+                          className="text-xs font-semibold text-gold border border-gold/30 bg-background rounded-full px-3 py-1.5"
                         >
                           {tag}
                         </span>

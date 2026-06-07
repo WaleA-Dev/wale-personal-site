@@ -133,6 +133,21 @@ html.light .card-glow {
   background: radial-gradient(circle at 50% 50%, rgba(122,92,32,0.07), transparent 70%);
 }
 
+/* ─── Keyboard tester panel ───────────────────────────────────────────────── */
+/* In dark mode the inner sections already have dark backgrounds — no frame needed.
+   In light mode, wrap everything in a dark terminal card. */
+.kt-panel {
+  border-radius: 0;
+  padding: 0;
+}
+
+html.light .kt-panel {
+  background: #0a0a0a;
+  border: 1px solid #1e1e22;
+  border-radius: 16px;
+  padding: 24px 16px;
+}
+
 /* ─── Browser window dots ─────────────────────────────────────────────────── */
 .window-dot {
   width: 10px;
