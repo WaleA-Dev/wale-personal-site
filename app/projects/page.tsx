@@ -68,7 +68,7 @@ export default function ProjectsPage() {
                       {demo.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="text-xs text-dim border border-subtle rounded-full px-3 py-1"
+                          className="text-xs font-semibold text-foreground bg-surface border border-muted/30 rounded-full px-3 py-1.5"
                         >
                           {tag}
                         </span>
