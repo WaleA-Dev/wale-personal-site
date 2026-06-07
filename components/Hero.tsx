@@ -6,7 +6,7 @@ const ease: [number, number, number, number] = [0.25, 0.4, 0.25, 1];
 
 export default function Hero() {
   return (
-    <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
+    <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-background">
       {/* Grid background */}
       <div className="hero-grid absolute inset-0" aria-hidden="true" />
       <div className="hero-glow absolute inset-0" aria-hidden="true" />
