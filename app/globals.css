@@ -42,7 +42,8 @@ html {
   scroll-behavior: smooth;
   scrollbar-width: thin;
   scrollbar-color: #1a1a1a #030303;
-  background: var(--color-background); /* prevents white flash on overscroll */
+  background: var(--color-background);
+  overscroll-behavior-y: none;
 }
 
 html.light {
