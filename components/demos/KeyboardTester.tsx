@@ -6,6 +6,11 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 // CONSTANTS
 // ============================================================
 
+const MICRO_RELEASE_MS = 20;
+const HOLD_CAP_MS = 3000;       // ignore accidental holds > 3s (e.g. walking away)
+const ROLLING_WINDOW_MS = 3000; // sliding window for "current" rate display
+const EMPTY = "--";
+
 const KEY_CODE_MAP: Record<string, string> = {
   Escape: "Esc", Digit1: "1", Digit2: "2", Digit3: "3", Digit4: "4", Digit5: "5",
   Digit6: "6", Digit7: "7", Digit8: "8", Digit9: "9", Digit0: "0", Minus: "-",
@@ -16,7 +21,7 @@ const KEY_CODE_MAP: Record<string, string> = {
   KeyK: "K", KeyL: "L", Semicolon: ";", Quote: "'", Enter: "Enter",
   ShiftLeft: "LShift", ShiftRight: "RShift", KeyZ: "Z", KeyX: "X", KeyC: "C",
   KeyV: "V", KeyB: "B", KeyN: "N", KeyM: "M", Comma: ",", Period: ".",
-  Slash: "/", ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+  Slash: "/", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→",
   Delete: "Del", Insert: "Ins", Home: "Home", End: "End", PageUp: "PgUp", PageDown: "PgDn",
   ControlLeft: "LCtrl", ControlRight: "RCtrl",
   MetaLeft: "Win", MetaRight: "Win", AltLeft: "LAlt", AltRight: "RAlt",
@@ -24,10 +29,12 @@ const KEY_CODE_MAP: Record<string, string> = {
   F1: "F1", F2: "F2", F3: "F3", F4: "F4", F5: "F5", F6: "F6",
   F7: "F7", F8: "F8", F9: "F9", F10: "F10", F11: "F11", F12: "F12",
   Backquote: "`", PrintScreen: "PrtSc", ScrollLock: "ScrLk", Pause: "Pause",
+  // Numpad — separate physical keys from main digits
+  Numpad0: "N0", Numpad1: "N1", Numpad2: "N2", Numpad3: "N3", Numpad4: "N4",
+  Numpad5: "N5", Numpad6: "N6", Numpad7: "N7", Numpad8: "N8", Numpad9: "N9",
+  NumpadAdd: "N+", NumpadSubtract: "N-", NumpadMultiply: "N*", NumpadDivide: "N/",
+  NumpadDecimal: "N.", NumpadEnter: "NEntr",
 };
-
-const MICRO_RELEASE_MS = 20;
-const EMPTY = "--";
 
 // ============================================================
 // KEYBOARD LAYOUT (ANSI)
@@ -107,7 +114,7 @@ const LAYOUT: KItem[][] = [
 // ============================================================
 
 interface KeyEvent {
-  key: string;
+  displayKey: string;
   code: string;
   type: "DOWN" | "UP";
   repeat: boolean;
@@ -123,30 +130,37 @@ interface KeyEvent {
 }
 
 interface InternalStats {
-  keydownIntervals: number[];
-  allIntervals: number[];
+  // Timing
+  keydownIntervals: number[];       // between consecutive non-repeat keydowns (for avg rate)
+  rollingKdTimestamps: number[];    // timestamps of recent keydowns (for rolling rate)
   lastKeydownTime: number | null;
-  lastEventTime: number | null;
-  totalEvents: number;
+  lastEventTime: number | null;     // for event log interval column only
+  // Counts — repeats excluded
   totalKeydowns: number;
   totalKeyups: number;
+  // Physical key state — ALL keyed by e.code for correctness
+  heldCodes: Set<string>;           // currently held physical keys
+  keyDownTimes: Record<string, number>;    // code → keydown timestamp
+  keyUpTimes: Record<string, number>;      // code → last keyup timestamp
+  lastKeydownPerKey: Record<string, number>; // code → last keydown timestamp (for tap interval)
+  // NKRO
   nkroMax: number;
-  heldKeys: Set<string>;
-  heldCodes: Set<string>;
-  testedKeys: Set<string>;
+  // Per-key stats
   testedCodes: Set<string>;
-  ghostEvents: number;
+  keyPressCount: Record<string, number>;  // code → press count
+  maxSingleKeyPresses: number;
+  // Hold distribution
+  holdDurations: number[];          // capped at HOLD_CAP_MS, excludes modifier-only holds
   microReleases: number;
-  holdDurations: number[];
-  keyDownTimes: Record<string, number>;
-  keyUpTimes: Record<string, number>;
+  // Reactivation (same physical key: up→down gap)
   reactivationGaps: number[];
+  // Same-key tap cycle (keydown→keydown of same key)
   sameKeyTapIntervals: number[];
-  lastKeydownPerKey: Record<string, number>;
-  keyPressCount: Record<string, number>;
+  // Bounce detection
+  bounceEvents: number;
+  // WPM
   typingChars: number;
   typingStartTime: number | null;
-  maxSingleKeyPresses: number;
 }
 
 interface ClassSignal {
@@ -164,17 +178,17 @@ interface Classification {
 
 interface DisplayStats {
   avgRate: number;
+  rollingRate: number;
   peakRate: number;
   minInterval: number;
   maxInterval: number;
   jitter: number;
-  totalEvents: number;
   totalKeydowns: number;
   totalKeyups: number;
   nkroMax: number;
   currentHeld: number;
   testedCount: number;
-  ghostEvents: number;
+  bounceEvents: number;
   microReleases: number;
   avgHold: number;
   minHold: number;
@@ -196,17 +210,19 @@ interface DisplayStats {
   keyPressCount: Record<string, number>;
   wpm: number;
   maxSingleKeyPresses: number;
+  // total meaningful events (no repeats) for threshold checks
+  totalEvents: number;
 }
 
 // ============================================================
-// CLASSIFICATION ENGINE (v2 — weighted multi-factor)
+// CLASSIFICATION ENGINE
 // ============================================================
 
 function classifySwitch(m: {
   holdP5: number; holdMean: number; holdStdDev: number;
   reactP5: number; reactMin: number;
   microRatio: number; maxTapRate: number;
-  ghostEvents: number; totalEvents: number; totalKeyups: number;
+  bounceEvents: number; totalEvents: number; totalKeyups: number;
   holdCount: number; reactCount: number;
   nkroMax: number; testedKeys: number;
   maxSingleKeyPresses: number;
@@ -215,7 +231,7 @@ function classifySwitch(m: {
     return {
       verdict: "NEED MORE DATA",
       confidence: "LOW",
-      description: "Type naturally or rapidly tap a single key to generate at least 50 events.",
+      description: "Type naturally or rapidly tap a single key to generate at least 50 physical press/release events.",
       signals: [],
     };
   }
@@ -224,119 +240,112 @@ function classifySwitch(m: {
   let rt = 0, mag = 0, mech = 0, mem = 0, sc = 0;
 
   // ── Signal 1: NKRO (weight up to 3.0) ──────────────────────
-  // HARDWARE signal — membrane matrix physically limits simultaneous keys.
-  // This is the single most reliable differentiator because it's not
-  // affected by typing speed or behavior.
+  // Hardware signal — membrane matrix physically limits simultaneous keys.
+  // Most reliable differentiator because it's not affected by typing speed.
   if (m.testedKeys >= 6) {
     if (m.nkroMax <= 3) {
       signals.push({ name: "Key Rollover", finding: `Max ${m.nkroMax} simultaneous keys — strong indicator of membrane matrix. Mechanical/magnetic keyboards register 6+ simultaneously.`, supports: "membrane" });
       mem += 3.0;
     } else if (m.nkroMax === 4) {
-      signals.push({ name: "Key Rollover", finding: `Max ${m.nkroMax} simultaneous keys — limited rollover, common in membrane designs. Try pressing 6+ keys at once.`, supports: "membrane" });
+      signals.push({ name: "Key Rollover", finding: `Max ${m.nkroMax} simultaneous keys — limited rollover, common in membrane. Press 6+ keys at once for a definitive reading.`, supports: "membrane" });
       mem += 1.5;
     } else if (m.nkroMax >= 10) {
-      signals.push({ name: "Key Rollover", finding: `Max ${m.nkroMax} simultaneous keys — full NKRO, typical of mechanical (diode matrix) or magnetic keyboards`, supports: "mechanical" });
+      signals.push({ name: "Key Rollover", finding: `Max ${m.nkroMax} simultaneous keys — full NKRO, typical of mechanical (diode matrix) or magnetic keyboards.`, supports: "mechanical" });
       mech += 1.5; mag += 0.5;
     } else if (m.nkroMax >= 7) {
-      signals.push({ name: "Key Rollover", finding: `Max ${m.nkroMax} simultaneous keys — good rollover capacity`, supports: "mechanical" });
+      signals.push({ name: "Key Rollover", finding: `Max ${m.nkroMax} simultaneous keys — good rollover capacity, consistent with mechanical or better membrane.`, supports: "mechanical" });
       mech += 0.5;
     }
   }
 
   // ── Signal 2: Hold Duration Floor — P5 (weight up to 2.0) ──
-  // Below 42ms is reliably mechanical/magnetic (physical springs or hall-effect).
-  // 42-55ms is an AMBIGUOUS ZONE — all keyboard types produce these during
-  // normal typing. Only claim membrane above 55ms where rubber dome physics
-  // creates a measurable floor.
+  // P5 of hold durations = the shortest 5% of holds.
+  // Sub-15ms is only achievable with non-contact sensors (RT/magnetic).
+  // 15-42ms is mechanical spring territory.
+  // Above 55ms without rapid-tap evidence = membrane rubber dome.
+  const didRapidTap = m.maxSingleKeyPresses >= 30;
   if (m.holdCount >= 10 && !isNaN(m.holdP5)) {
     const p5 = m.holdP5;
     if (p5 < 8) {
-      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — sub-8ms holds are physically impossible with springs or rubber domes. Rapid trigger confirmed.`, supports: "rapid_trigger" });
+      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — sub-8ms holds are physically impossible without non-contact sensing. Rapid trigger confirmed.`, supports: "rapid_trigger" });
       rt += 2.0; mag += 0.5;
     } else if (p5 < 15) {
-      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — well below mechanical (~30ms) and membrane (~50ms) floors. Consistent with magnetic hall-effect.`, supports: "magnetic" });
+      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — well below mechanical spring floor (~30ms). Consistent with magnetic hall-effect switches.`, supports: "magnetic" });
       mag += 1.5;
     } else if (p5 < 25) {
-      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — short holds, could be magnetic switches or fast mechanical typing`, supports: "neutral" });
+      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — short holds. Could be magnetic switches or very deliberate fast mechanical tapping.`, supports: "neutral" });
     } else if (p5 < 42) {
-      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — consistent with mechanical switch spring travel (~2mm + debounce)`, supports: "mechanical" });
+      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — consistent with mechanical switch spring travel (2-4mm + firmware debounce).`, supports: "mechanical" });
       mech += 1.5;
     } else if (p5 < 55) {
-      // AMBIGUOUS ZONE: 42-55ms. All switch types produce this during
-      // normal typing. Don't assign to any category.
-      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — ambiguous range (42-55ms). All switch types produce this during normal typing. Complete the rollover test for a definitive answer.`, supports: "neutral" });
+      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — ambiguous zone (42-55ms). All switch types produce this during normal typing. Complete the rollover and rapid-tap tests.`, supports: "neutral" });
     } else if (p5 < 65) {
-      // Only weak membrane signal — and only if not just normal slow typing
-      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — slightly elevated, could indicate rubber dome. Complete the rollover and rapid tap tests for a definitive answer.`, supports: "neutral" });
+      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — slightly elevated. May indicate rubber dome. Rollover test needed for confirmation.`, supports: "neutral" });
     } else {
-      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — high hold floor, typical of membrane rubber dome keyboards`, supports: "membrane" });
+      signals.push({ name: "Hold Duration Floor", finding: `P5 = ${p5.toFixed(1)}ms — elevated floor typical of membrane rubber dome keyboards.`, supports: "membrane" });
       mem += 1.0;
     }
   }
 
   // ── Signal 3: Same-key Re-activation P5 (weight up to 1.5) ──
-  // Below 20ms is reliably magnetic (hardware capability).
-  // Above 100ms COULD indicate membrane, but ONLY if the user was doing
-  // deliberate rapid tapping. During normal typing, everyone's react P5
-  // is slow — it reflects typing cadence, not switch limitations.
-    // Did the user do focused rapid tapping on a single key?
-  // 30+ presses on one key is strong evidence of deliberate testing,
-  // not just frequent use of a common letter during typing.
-  const didRapidTap = m.maxSingleKeyPresses >= 30;
+  // Measures the up→down gap for repeated presses of the same key.
+  // Only meaningful when the user deliberately rapid-tapped one key.
   if (m.reactCount >= 5 && !isNaN(m.reactP5)) {
     const rp5 = m.reactP5;
     if (rp5 < 8) {
-      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — near-instant re-activation, hallmark of rapid trigger (0.1mm reset)`, supports: "rapid_trigger" });
+      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — near-instant re-activation. Hallmark of rapid trigger (0.1mm reset).`, supports: "rapid_trigger" });
       rt += 1.5; mag += 0.5;
     } else if (rp5 < 20) {
-      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — very fast re-activation, below mechanical spring reset time`, supports: "magnetic" });
+      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — very fast re-activation, below mechanical spring reset time (~25ms).`, supports: "magnetic" });
       mag += 1.5;
     } else if (rp5 >= 100 && didRapidTap) {
-      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — slow re-activation during rapid tapping, consistent with rubber dome rebound delay`, supports: "membrane" });
+      signals.push({ name: "Re-activation Speed", finding: `P5 = ${rp5.toFixed(1)}ms — slow re-activation during rapid tapping, consistent with rubber dome rebound delay.`, supports: "membrane" });
       mem += 1.0;
     }
   }
 
   // ── Signal 4: Re-activation Floor (weight up to 2.5) ──────
-  // The fastest same-key re-activation. Membrane domes physically cannot
-  // reform faster than ~55ms — BUT this is only meaningful when the user
-  // was TRYING to tap fast. During normal typing, react min just reflects
-  // typing speed. Gate on rapid-tap evidence (30+ presses on one key).
+  // Fastest single same-key re-activation. Only scored when user did rapid tapping,
+  // because during normal typing this just reflects natural typing cadence.
   if (m.reactCount >= 3 && m.reactMin < Infinity) {
     if (m.reactMin < 5) {
-      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — near-instant, only possible with rapid trigger`, supports: "rapid_trigger" });
+      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — near-instant, only possible with rapid trigger hardware.`, supports: "rapid_trigger" });
       rt += 1.5;
     } else if (m.reactMin < 15) {
-      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — very fast minimum, consistent with magnetic switches`, supports: "magnetic" });
+      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — very fast minimum, consistent with magnetic hall-effect switches.`, supports: "magnetic" });
       mag += 1.0;
     } else if (m.reactMin > 55 && didRapidTap) {
-      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms during rapid tapping — rubber dome membranes physically cannot reset faster than ~55ms`, supports: "membrane" });
+      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms during rapid tapping — rubber dome membranes physically cannot reset faster than ~55ms.`, supports: "membrane" });
       mem += 2.5;
     } else if (m.reactMin > 55 && !didRapidTap) {
-      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — but no rapid-tap data yet. Tap a single key 30+ times rapidly for this signal to be meaningful.`, supports: "neutral" });
+      signals.push({ name: "Re-activation Floor", finding: `Min = ${m.reactMin.toFixed(1)}ms — but no rapid-tap evidence yet. Tap a single key 30+ times rapidly for this signal to be meaningful.`, supports: "neutral" });
     }
   }
 
   // ── Signal 5: Micro-release Ratio (weight up to 2.5) ──────
-  // Only magnetic/RT can produce sub-20ms holds. Both mechanical and
-  // membrane have physical travel that prevents micro-releases.
+  // Sub-20ms holds are physically impossible with spring or dome travel.
+  // Only non-contact sensors (hall-effect + RT) can produce them.
   if (m.totalKeyups >= 20) {
     if (m.microRatio > 0.2) {
-      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% of holds <${MICRO_RELEASE_MS}ms — strong rapid trigger indicator (impossible with physical travel)`, supports: "rapid_trigger" });
+      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% of holds <${MICRO_RELEASE_MS}ms — strong rapid trigger indicator (impossible with physical travel).`, supports: "rapid_trigger" });
       rt += 2.5;
     } else if (m.microRatio > 0.05) {
-      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% micro-releases detected — consistent with magnetic hall-effect switches`, supports: "magnetic" });
+      signals.push({ name: "Micro-release Ratio", finding: `${(m.microRatio * 100).toFixed(1)}% micro-releases — consistent with magnetic hall-effect switches.`, supports: "magnetic" });
       mag += 1.5;
     }
   }
 
-  // ── Signal 6: Ghost / Bounce Events (weight up to 1.0) ────
-  if (m.totalEvents >= 100) {
-    if (m.ghostEvents > 5) {
-      signals.push({ name: "Contact Bounce", finding: `${m.ghostEvents} ghost events — keydown without keyup, characteristic of metal contact bounce in mechanical switches`, supports: "mechanical" });
+  // ── Signal 6: Contact Bounce Events (weight up to 1.0) ────
+  // A "bounce event" is a second keydown on the same physical key before its keyup —
+  // indicating firmware debounce failure (metal contact bounce).
+  // Note: focus changes can also cause stale held-key state, so this has some
+  // false-positive risk and is weighted conservatively.
+  if (m.totalKeyups >= 100) {
+    if (m.bounceEvents > 5) {
+      signals.push({ name: "Contact Bounce", finding: `${m.bounceEvents} bounce events — repeated keydown without intermediate keyup. Indicates firmware debounce failure, more common in cheap mechanical keyboards.`, supports: "mechanical" });
       mech += 1.0;
-    } else if (m.ghostEvents === 0 && m.totalEvents >= 200) {
-      signals.push({ name: "Contact Bounce", finding: `0 ghost events over ${m.totalEvents} events — clean signaling, consistent with membrane or magnetic (non-contact) designs`, supports: "neutral" });
+    } else if (m.bounceEvents === 0 && m.totalKeyups >= 200) {
+      signals.push({ name: "Contact Bounce", finding: `0 bounce events over ${m.totalKeyups} keyups — clean signaling. Consistent with good firmware debounce, membrane, or magnetic (non-contact) keyboards.`, supports: "neutral" });
     }
   }
 
@@ -344,26 +353,25 @@ function classifySwitch(m: {
   if (m.holdCount >= 20 && m.holdMean > 0) {
     const cv = m.holdStdDev / m.holdMean;
     if (cv < 0.15 && m.holdMean < 30) {
-      signals.push({ name: "Hold Consistency", finding: `CV = ${cv.toFixed(2)} with mean ${m.holdMean.toFixed(0)}ms — very uniform short holds, typical of analog hall-effect sensing`, supports: "magnetic" });
+      signals.push({ name: "Hold Consistency", finding: `CV = ${cv.toFixed(2)} with mean ${m.holdMean.toFixed(0)}ms — very uniform short holds, typical of analog hall-effect sensing.`, supports: "magnetic" });
       mag += 0.5;
     }
   }
 
   // ── Signal 8: Peak Tap Rate (weight up to 0.5) ────────────
-  // Only significant at high extremes. Low tap rate is NOT reliable.
+  // Computed from P5 of keydown-to-keydown intervals on the SAME key.
+  // Only scored at extremes — average human max ~15-20 taps/sec on mechanical.
   if (m.maxTapRate > 30) {
-    signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — exceeds mechanical/membrane physical limits (~20/sec), rapid trigger territory`, supports: "rapid_trigger" });
+    signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — exceeds mechanical/membrane physical limits (~20-25/sec). Rapid trigger territory.`, supports: "rapid_trigger" });
     rt += 0.5; mag += 0.3;
   } else if (m.maxTapRate > 20) {
-    signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — at the edge of mechanical capability`, supports: "magnetic" });
+    signals.push({ name: "Peak Tap Rate", finding: `${m.maxTapRate.toFixed(1)} taps/sec — at or above the mechanical capability ceiling.`, supports: "magnetic" });
     mag += 0.3;
   }
 
-  // ── Signal 9: Scissor / Low-Profile Detection (compound) ──
-  // Scissor switches (laptop keyboards) have a unique fingerprint:
-  // moderate hold (42-65ms) + fast reactivation (<35ms React Min).
-  // Traditional membrane rubber domes need 55ms+ to reform, but
-  // scissor's tiny ~1mm-travel dome snaps back much faster.
+  // ── Signal 9: Scissor Switch Signature (compound) ─────────
+  // Scissor switches have moderate hold (42-65ms) but faster reactivation
+  // than standard membrane, because their small dome reforms faster.
   if (m.holdCount >= 10 && m.reactCount >= 3 && !isNaN(m.holdP5) && m.reactMin < Infinity) {
     const p5 = m.holdP5;
     const isScissorHoldRange = p5 >= 42 && p5 <= 65;
@@ -373,15 +381,14 @@ function classifySwitch(m: {
     if (isScissorHoldRange && isScissorReactMin) {
       signals.push({
         name: "Scissor Switch Signature",
-        finding: `Hold P5 = ${p5.toFixed(1)}ms (42-65ms range) with React Min = ${m.reactMin.toFixed(1)}ms (<35ms) — rubber domes need 55ms+ to reform, but scissor switches have tiny domes with ~1mm travel allowing much faster reactivation`,
+        finding: `Hold P5 = ${p5.toFixed(1)}ms (42-65ms range) + React Min = ${m.reactMin.toFixed(1)}ms (<35ms). Standard dome membranes need 55ms+ to reform; scissor domes with ~1mm travel reform much faster.`,
         supports: "scissor",
       });
       sc += 1.5;
-
       if (isScissorReactP5) {
         signals.push({
           name: "Scissor Reactivation Profile",
-          finding: `React P5 = ${m.reactP5.toFixed(1)}ms (<80ms) — consistent with low-profile scissor mechanism, faster than membrane (typically 85ms+)`,
+          finding: `React P5 = ${m.reactP5.toFixed(1)}ms (<80ms) — consistent with low-profile scissor mechanism (faster than standard membrane, typically >85ms).`,
           supports: "scissor",
         });
         sc += 1.0;
@@ -395,32 +402,31 @@ function classifySwitch(m: {
   const conclusive = signals.length >= 2 || maxScore >= 2.5 || (total >= 1.5 && signals.length >= 1);
 
   if (!conclusive) {
-    // Build specific guidance based on what's missing
     const hints: string[] = [];
     if (m.nkroMax < 6 || m.testedKeys < 6) hints.push("press 6+ keys simultaneously to test rollover");
-    if (m.holdCount < 30 || m.reactCount < 10) hints.push("rapidly tap a single key for 10+ seconds");
+    if (m.maxSingleKeyPresses < 30) hints.push("rapidly tap a single key 30+ times");
     if (hints.length === 0) hints.push("try rapid trigger micro-tapping if your keyboard supports it");
     return {
       verdict: "INCONCLUSIVE",
       confidence: "LOW",
-      description: `Classification is ambiguous with current data. During normal typing, mechanical and magnetic keyboards produce similar patterns. To get a definitive result: ${hints.join("; ")}.`,
+      description: `Data is ambiguous — during normal typing, mechanical and magnetic keyboards produce nearly identical patterns. To get a definitive result: ${hints.join("; ")}.`,
       signals,
     };
   }
 
   const dominance = maxScore / total;
-  const dataRich = m.totalEvents >= 100 && m.holdCount >= 30;
+  const dataRich = m.totalKeyups >= 100 && m.holdCount >= 30;
   const conf: "HIGH" | "MEDIUM" | "LOW" =
     dominance > 0.5 && dataRich && total >= 2.0 ? "HIGH" : dominance > 0.35 ? "MEDIUM" : "LOW";
 
   if (rt >= mag && rt >= mech && rt >= mem && rt >= sc) {
     return { verdict: "RAPID TRIGGER", confidence: conf, description: "Magnetic hall-effect switches with rapid trigger enabled. Ultra-short holds and near-instant re-activation detected — physically impossible on mechanical or membrane.", signals };
   } else if (mag >= mech && mag >= mem && mag >= sc) {
-    return { verdict: "LIKELY MAGNETIC", confidence: conf, description: "Characteristics consistent with magnetic hall-effect switches. Clean timing, short hold durations, and no contact bounce artifacts.", signals };
+    return { verdict: "LIKELY MAGNETIC", confidence: conf, description: "Characteristics consistent with magnetic hall-effect switches. Clean timing, short hold durations, and no contact bounce.", signals };
   } else if (sc >= mech && sc >= mem) {
-    return { verdict: "LIKELY SCISSOR", confidence: conf, description: "Characteristics consistent with scissor (low-profile) switches, typically found in laptop keyboards. Moderate hold times with fast reactivation indicate a small rubber dome with minimal travel (~1mm).", signals };
+    return { verdict: "LIKELY SCISSOR", confidence: conf, description: "Characteristics consistent with scissor (low-profile) switches, typically found in laptop keyboards. Moderate hold times with faster-than-membrane reactivation indicate a small dome with ~1mm travel.", signals };
   } else if (mem > mech) {
-    return { verdict: "LIKELY MEMBRANE", confidence: conf, description: "Characteristics consistent with membrane (rubber dome) keyboard. Limited key rollover, elevated hold durations, and slower re-activation indicate rubber dome construction.", signals };
+    return { verdict: "LIKELY MEMBRANE", confidence: conf, description: "Characteristics consistent with membrane (rubber dome) keyboard. Limited key rollover and/or elevated hold durations indicate rubber dome construction.", signals };
   } else {
     return { verdict: "LIKELY MECHANICAL", confidence: conf, description: "Characteristics consistent with mechanical switches. Hold patterns match spring-based travel and firmware debounce. Note: magnetic switches without rapid trigger produce identical patterns during normal typing.", signals };
   }
@@ -440,22 +446,33 @@ const VERDICT_COLORS: Record<string, string> = {
   "NEED MORE DATA": "#555555",
 };
 const SIGNAL_COLORS: Record<string, string> = {
-  rapid_trigger: "#ff44cc", magnetic: "#44aaff", mechanical: "#ffaa44", membrane: "#22ccaa", scissor: "#b388ff", neutral: "#555555",
+  rapid_trigger: "#ff44cc", magnetic: "#44aaff", mechanical: "#ffaa44",
+  membrane: "#22ccaa", scissor: "#b388ff", neutral: "#555555",
 };
 
 function createFreshStats(): InternalStats {
   return {
-    keydownIntervals: [], allIntervals: [],
-    lastKeydownTime: null, lastEventTime: null,
-    totalEvents: 0, totalKeydowns: 0, totalKeyups: 0,
-    nkroMax: 0, heldKeys: new Set(), heldCodes: new Set(),
-    testedKeys: new Set(), testedCodes: new Set(),
-    ghostEvents: 0, microReleases: 0,
-    holdDurations: [], keyDownTimes: {},
-    keyUpTimes: {}, reactivationGaps: [],
-    sameKeyTapIntervals: [], lastKeydownPerKey: {},
-    keyPressCount: {}, typingChars: 0, typingStartTime: null,
+    keydownIntervals: [],
+    rollingKdTimestamps: [],
+    lastKeydownTime: null,
+    lastEventTime: null,
+    totalKeydowns: 0,
+    totalKeyups: 0,
+    heldCodes: new Set(),
+    keyDownTimes: {},
+    keyUpTimes: {},
+    lastKeydownPerKey: {},
+    nkroMax: 0,
+    testedCodes: new Set(),
+    keyPressCount: {},
     maxSingleKeyPresses: 0,
+    holdDurations: [],
+    microReleases: 0,
+    reactivationGaps: [],
+    sameKeyTapIntervals: [],
+    bounceEvents: 0,
+    typingChars: 0,
+    typingStartTime: null,
   };
 }
 
@@ -476,19 +493,34 @@ function isInteractiveElement(target: EventTarget | null): boolean {
   );
 }
 
+// Measure browser's performance.now() resolution by sampling 50 consecutive calls.
+function measureTimingResolutionMs(): number {
+  const samples: number[] = [];
+  let prev = performance.now();
+  for (let i = 0; i < 200; i++) {
+    const now = performance.now();
+    const delta = now - prev;
+    if (delta > 0) samples.push(delta);
+    prev = now;
+  }
+  if (samples.length === 0) return 1;
+  samples.sort((a, b) => a - b);
+  return samples[0]; // smallest non-zero step = resolution
+}
+
 function createEmptyDisplayStats(): DisplayStats {
   const empty = classifySwitch({
     holdP5: NaN, holdMean: 0, holdStdDev: 0,
     reactP5: NaN, reactMin: Infinity,
     microRatio: 0, maxTapRate: 0,
-    ghostEvents: 0, totalEvents: 0, totalKeyups: 0,
+    bounceEvents: 0, totalEvents: 0, totalKeyups: 0,
     holdCount: 0, reactCount: 0, nkroMax: 0, testedKeys: 0, maxSingleKeyPresses: 0,
   });
   return {
-    avgRate: 0, peakRate: 0, minInterval: Infinity, maxInterval: 0, jitter: 0,
-    totalEvents: 0, totalKeydowns: 0, totalKeyups: 0,
+    avgRate: 0, rollingRate: 0, peakRate: 0, minInterval: Infinity, maxInterval: 0, jitter: 0,
+    totalKeydowns: 0, totalKeyups: 0,
     nkroMax: 0, currentHeld: 0, testedCount: 0,
-    ghostEvents: 0, microReleases: 0,
+    bounceEvents: 0, microReleases: 0,
     avgHold: 0, minHold: Infinity,
     holdP5: NaN, holdP25: NaN, holdP50: NaN, holdP75: NaN, holdP95: NaN, holdStdDev: 0,
     reactP5: NaN, reactMedian: NaN, reactMin: Infinity,
@@ -500,6 +532,7 @@ function createEmptyDisplayStats(): DisplayStats {
     keyPressCount: {},
     wpm: 0,
     maxSingleKeyPresses: 0,
+    totalEvents: 0,
   };
 }
 
@@ -526,16 +559,31 @@ export default function KeyboardTester() {
   const [tab, setTab] = useState("diagnostics");
   const [isRecording, setIsRecording] = useState(true);
   const [isCaptureFocused, setIsCaptureFocused] = useState(false);
+  const [timingResMs, setTimingResMs] = useState<number | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const eventsRef = useRef<KeyEvent[]>([]);
   const startRef = useRef(0);
   const statsRef = useRef<InternalStats>(createFreshStats());
 
+  // Measure timing resolution once on mount
+  useEffect(() => {
+    startRef.current = performance.now();
+    setTimingResMs(measureTimingResolutionMs());
+    requestAnimationFrame(() => { containerRef.current?.focus(); });
+  }, []);
+
   // ── Stats computation ──────────────────────────────────────
   const getStats = useCallback((): DisplayStats => {
     const s = statsRef.current;
     const now = performance.now();
+
+    // Rolling rate: keydowns in the last ROLLING_WINDOW_MS
+    const cutoff = now - ROLLING_WINDOW_MS;
+    const recentKds = s.rollingKdTimestamps.filter(t => t >= cutoff);
+    const rollingRate = recentKds.length > 1
+      ? (recentKds.length - 1) / (ROLLING_WINDOW_MS / 1000)
+      : 0;
 
     const kdIntervals = s.keydownIntervals;
     const rates = kdIntervals.filter(i => i > 0).map(i => 1000 / i);
@@ -568,16 +616,21 @@ export default function KeyboardTester() {
     const tapP5 = pctSorted(sortedTaps, 5);
     const maxTapRate = !isNaN(tapP5) && tapP5 > 0 ? 1000 / tapP5 : 0;
 
-    const microRatio = s.totalKeyups > 0 ? s.microReleases / s.totalKeyups : 0;
+    const totalKeyups = s.totalKeyups;
+    const microRatio = totalKeyups > 0 ? s.microReleases / totalKeyups : 0;
+    const totalEvents = s.totalKeydowns + totalKeyups;
 
     const classification = classifySwitch({
       holdP5, holdMean: avgHold, holdStdDev,
       reactP5, reactMin,
       microRatio, maxTapRate,
-      ghostEvents: s.ghostEvents,
-      totalEvents: s.totalEvents, totalKeyups: s.totalKeyups,
-      holdCount: holds.length, reactCount: s.reactivationGaps.length,
-      nkroMax: s.nkroMax, testedKeys: s.testedKeys.size,
+      bounceEvents: s.bounceEvents,
+      totalEvents,
+      totalKeyups,
+      holdCount: holds.length,
+      reactCount: s.reactivationGaps.length,
+      nkroMax: s.nkroMax,
+      testedKeys: s.testedCodes.size,
       maxSingleKeyPresses: s.maxSingleKeyPresses,
     });
 
@@ -585,11 +638,14 @@ export default function KeyboardTester() {
     const wpm = elapsedMinutes > 0.05 ? (s.typingChars / elapsedMinutes) / 5 : 0;
 
     return {
-      avgRate, peakRate, minInterval, maxInterval, jitter,
-      totalEvents: s.totalEvents, totalKeydowns: s.totalKeydowns,
-      totalKeyups: s.totalKeyups, nkroMax: s.nkroMax,
-      currentHeld: s.heldKeys.size, testedCount: s.testedKeys.size,
-      ghostEvents: s.ghostEvents, microReleases: s.microReleases,
+      avgRate, rollingRate, peakRate, minInterval, maxInterval, jitter,
+      totalKeydowns: s.totalKeydowns,
+      totalKeyups,
+      nkroMax: s.nkroMax,
+      currentHeld: s.heldCodes.size,
+      testedCount: s.testedCodes.size,
+      bounceEvents: s.bounceEvents,
+      microReleases: s.microReleases,
       avgHold, minHold,
       holdP5, holdP25, holdP50, holdP75, holdP95, holdStdDev,
       reactP5, reactMedian, reactMin,
@@ -601,15 +657,11 @@ export default function KeyboardTester() {
       keyPressCount: { ...s.keyPressCount },
       wpm,
       maxSingleKeyPresses: s.maxSingleKeyPresses,
+      totalEvents,
     };
   }, []);
 
   const [displayStats, setDisplayStats] = useState<DisplayStats>(createEmptyDisplayStats);
-
-  useEffect(() => {
-    startRef.current = performance.now();
-    requestAnimationFrame(() => { containerRef.current?.focus(); });
-  }, []);
 
   const addEvent = useCallback((evt: KeyEvent) => {
     eventsRef.current = [...eventsRef.current.slice(-500), evt];
@@ -621,140 +673,164 @@ export default function KeyboardTester() {
   useEffect(() => {
     if (!isRecording) return;
 
-    const isModifierCombo = (event: KeyboardEvent) =>
-      (event.ctrlKey && event.key !== "Control") ||
-      (event.altKey && event.key !== "Alt") ||
-      (event.metaKey && event.key !== "Meta");
-
-    const canCapture = (event: KeyboardEvent) => {
+    // We capture ALL keys when the tester has focus — including modifier combos.
+    // e.preventDefault() prevents browser shortcuts; only true OS-level shortcuts
+    // (Ctrl+W, Ctrl+T) may pass through depending on the browser.
+    const canCapture = (event: KeyboardEvent): boolean => {
       if (!containerRef.current) return false;
+      if (event.defaultPrevented) return false;
       const activeElement = document.activeElement;
       if (!(activeElement instanceof HTMLElement)) return false;
       if (!containerRef.current.contains(activeElement)) return false;
-      if (event.defaultPrevented || isModifierCombo(event)) return false;
       return !isInteractiveElement(event.target);
     };
 
     const handleDown = (e: KeyboardEvent) => {
       if (!canCapture(e)) return;
       e.preventDefault();
+
       const s = statsRef.current;
       const now = performance.now();
-      const key = KEY_CODE_MAP[e.code] || e.key;
+      // physKey = e.code: unique physical key identifier (e.g. "ShiftLeft" vs "ShiftRight")
+      const physKey = e.code;
+      const displayKey = KEY_CODE_MAP[physKey] ?? e.key;
 
-      const allInterval = s.lastEventTime !== null ? (now - s.lastEventTime) : null;
+      // Interval between this event and the last (any type) — for event log display only
+      const eventInterval = s.lastEventTime !== null ? (now - s.lastEventTime) : null;
       s.lastEventTime = now;
-      s.totalEvents++;
 
-      if (allInterval !== null && allInterval > 0) {
-        s.allIntervals = [...s.allIntervals.slice(-499), allInterval];
+      // Only count non-repeat events as real keydowns
+      if (e.repeat) {
+        // Still log the repeat event for the event log, but don't count it anywhere else
+        addEvent({
+          displayKey, code: physKey, type: "DOWN", repeat: true,
+          interval: eventInterval !== null ? eventInterval.toFixed(3) : EMPTY,
+          hz: eventInterval !== null && eventInterval > 0 ? (1000 / eventInterval).toFixed(1) : EMPTY,
+          elapsed: ((now - startRef.current) / 1000).toFixed(3),
+          extra: "REPEAT",
+          timestampMs: now, elapsedMs: now - startRef.current,
+          intervalMs: eventInterval, holdMs: null, reactivationMs: null,
+        });
+        return;
       }
 
-      let kdInterval: number | null = null;
+      // — Physical keydown (non-repeat) —
+      const kdInterval = s.lastKeydownTime !== null ? (now - s.lastKeydownTime) : null;
+      s.lastKeydownTime = now;
+      s.totalKeydowns++;
+
+      if (kdInterval !== null && kdInterval > 0) {
+        s.keydownIntervals = [...s.keydownIntervals.slice(-499), kdInterval];
+      }
+
+      // Rolling rate window: keep timestamps for last ROLLING_WINDOW_MS + buffer
+      s.rollingKdTimestamps = [...s.rollingKdTimestamps.slice(-999), now]
+        .filter(t => t >= now - ROLLING_WINDOW_MS - 500);
+
+      // Same-key re-activation gap (up→down of this physical key)
       let reactivationGap: number | null = null;
-
-      if (!e.repeat) {
-        kdInterval = s.lastKeydownTime !== null ? (now - s.lastKeydownTime) : null;
-        s.lastKeydownTime = now;
-        s.totalKeydowns++;
-
-        if (kdInterval !== null && kdInterval > 0) {
-          s.keydownIntervals = [...s.keydownIntervals.slice(-499), kdInterval];
-        }
-
-        const lastUp = s.keyUpTimes[key];
-        if (lastUp !== undefined) {
-          reactivationGap = now - lastUp;
-          s.reactivationGaps = [...s.reactivationGaps.slice(-299), reactivationGap];
-        }
-
-        const lastDown = s.lastKeydownPerKey[key];
-        if (lastDown !== undefined) {
-          const tapInterval = now - lastDown;
-          s.sameKeyTapIntervals = [...s.sameKeyTapIntervals.slice(-299), tapInterval];
-        }
-        s.lastKeydownPerKey[key] = now;
-
-        if (s.heldKeys.has(key)) s.ghostEvents++;
-        s.keyDownTimes[key] = now;
-
-        // Track per-code press count
-        s.keyPressCount[e.code] = (s.keyPressCount[e.code] || 0) + 1;
-        s.maxSingleKeyPresses = Math.max(s.maxSingleKeyPresses, s.keyPressCount[e.code]);
-
-        // WPM tracking: count alphanumeric chars
-        if (e.code.startsWith("Key") || e.code.startsWith("Digit") || e.code === "Space") {
-          if (s.typingStartTime === null) s.typingStartTime = now;
-          s.typingChars++;
-        }
+      const lastUp = s.keyUpTimes[physKey];
+      if (lastUp !== undefined) {
+        reactivationGap = now - lastUp;
+        s.reactivationGaps = [...s.reactivationGaps.slice(-299), reactivationGap];
       }
 
-      s.heldKeys.add(key);
-      s.heldCodes.add(e.code);
-      s.nkroMax = Math.max(s.nkroMax, s.heldKeys.size);
-      s.testedKeys.add(key);
-      s.testedCodes.add(e.code);
+      // Same-key tap cycle interval (keydown→keydown of this physical key)
+      const lastDown = s.lastKeydownPerKey[physKey];
+      if (lastDown !== undefined) {
+        const tapInterval = now - lastDown;
+        s.sameKeyTapIntervals = [...s.sameKeyTapIntervals.slice(-299), tapInterval];
+      }
+      s.lastKeydownPerKey[physKey] = now;
 
-      const elapsedMs = now - startRef.current;
+      // Contact bounce detection: non-repeat keydown while this key is already "held"
+      // (can happen on debounce failure; also possible after a missed keyup from focus loss)
+      if (s.heldCodes.has(physKey)) {
+        s.bounceEvents++;
+      }
+      s.keyDownTimes[physKey] = now;
+
+      // Per-code press count
+      s.keyPressCount[physKey] = (s.keyPressCount[physKey] || 0) + 1;
+      s.maxSingleKeyPresses = Math.max(s.maxSingleKeyPresses, s.keyPressCount[physKey]);
+
+      // WPM: count alpha, digit, and space keys
+      if (physKey.startsWith("Key") || physKey.startsWith("Digit") || physKey === "Space") {
+        if (s.typingStartTime === null) s.typingStartTime = now;
+        s.typingChars++;
+      }
+
+      s.heldCodes.add(physKey);
+      s.nkroMax = Math.max(s.nkroMax, s.heldCodes.size);
+      s.testedCodes.add(physKey);
+
       addEvent({
-        key, code: e.code, type: "DOWN", repeat: e.repeat,
-        interval: allInterval !== null ? allInterval.toFixed(3) : EMPTY,
-        hz: allInterval !== null && allInterval > 0 ? (1000 / allInterval).toFixed(1) : EMPTY,
-        elapsed: (elapsedMs / 1000).toFixed(3),
-        extra: e.repeat ? "REPEAT" : reactivationGap !== null ? `react: ${reactivationGap.toFixed(1)}ms` : "",
-        timestampMs: now, elapsedMs,
-        intervalMs: allInterval, holdMs: null,
-        reactivationMs: reactivationGap,
+        displayKey, code: physKey, type: "DOWN", repeat: false,
+        interval: eventInterval !== null ? eventInterval.toFixed(3) : EMPTY,
+        hz: eventInterval !== null && eventInterval > 0 ? (1000 / eventInterval).toFixed(1) : EMPTY,
+        elapsed: ((now - startRef.current) / 1000).toFixed(3),
+        extra: reactivationGap !== null ? `react: ${reactivationGap.toFixed(1)}ms` : "",
+        timestampMs: now, elapsedMs: now - startRef.current,
+        intervalMs: eventInterval, holdMs: null, reactivationMs: reactivationGap,
       });
     };
 
     const handleUp = (e: KeyboardEvent) => {
       if (!canCapture(e)) return;
       e.preventDefault();
+
       const s = statsRef.current;
       const now = performance.now();
-      const key = KEY_CODE_MAP[e.code] || e.key;
+      const physKey = e.code;
+      const displayKey = KEY_CODE_MAP[physKey] ?? e.key;
 
-      const allInterval = s.lastEventTime !== null ? (now - s.lastEventTime) : null;
+      const eventInterval = s.lastEventTime !== null ? (now - s.lastEventTime) : null;
       s.lastEventTime = now;
-      s.totalEvents++;
       s.totalKeyups++;
 
-      if (allInterval !== null && allInterval > 0) {
-        s.allIntervals = [...s.allIntervals.slice(-499), allInterval];
-      }
-
-      const downTime = s.keyDownTimes[key];
+      const downTime = s.keyDownTimes[physKey];
       let holdDuration: number | null = null;
       if (downTime !== undefined) {
         holdDuration = now - downTime;
-        s.holdDurations = [...s.holdDurations.slice(-299), holdDuration];
-        if (holdDuration < MICRO_RELEASE_MS) s.microReleases++;
-        delete s.keyDownTimes[key];
+        // Cap at HOLD_CAP_MS to ignore accidental holds (walked away, focus loss, etc.)
+        if (holdDuration <= HOLD_CAP_MS) {
+          s.holdDurations = [...s.holdDurations.slice(-299), holdDuration];
+          if (holdDuration < MICRO_RELEASE_MS) s.microReleases++;
+        }
+        delete s.keyDownTimes[physKey];
       }
 
-      s.keyUpTimes[key] = now;
-      s.heldKeys.delete(key);
-      s.heldCodes.delete(e.code);
+      s.keyUpTimes[physKey] = now;
+      s.heldCodes.delete(physKey);
 
-      const elapsedMs = now - startRef.current;
       addEvent({
-        key, code: e.code, type: "UP", repeat: false,
-        interval: allInterval !== null ? allInterval.toFixed(3) : EMPTY,
-        hz: allInterval !== null && allInterval > 0 ? (1000 / allInterval).toFixed(1) : EMPTY,
-        elapsed: (elapsedMs / 1000).toFixed(3),
+        displayKey, code: physKey, type: "UP", repeat: false,
+        interval: eventInterval !== null ? eventInterval.toFixed(3) : EMPTY,
+        hz: eventInterval !== null && eventInterval > 0 ? (1000 / eventInterval).toFixed(1) : EMPTY,
+        elapsed: ((now - startRef.current) / 1000).toFixed(3),
         extra: holdDuration !== null ? `hold: ${holdDuration.toFixed(1)}ms` : "",
-        timestampMs: now, elapsedMs,
-        intervalMs: allInterval, holdMs: holdDuration,
-        reactivationMs: null,
+        timestampMs: now, elapsedMs: now - startRef.current,
+        intervalMs: eventInterval, holdMs: holdDuration, reactivationMs: null,
       });
+    };
+
+    // Clear held-key state when window loses focus.
+    // Without this, any key held when focus leaves stays "held" forever,
+    // causing the next press of that key to be counted as a bounce event.
+    const handleBlur = () => {
+      const s = statsRef.current;
+      s.heldCodes.clear();
+      s.keyDownTimes = {};
+      // Don't clear keyUpTimes — reactivation tracking across focus changes is still valid
     };
 
     window.addEventListener("keydown", handleDown);
     window.addEventListener("keyup", handleUp);
+    window.addEventListener("blur", handleBlur);
     return () => {
       window.removeEventListener("keydown", handleDown);
       window.removeEventListener("keyup", handleUp);
+      window.removeEventListener("blur", handleBlur);
     };
   }, [isRecording, addEvent]);
 
@@ -777,15 +853,21 @@ export default function KeyboardTester() {
   const downloadReport = () => {
     const ds = displayStats;
     const report = {
-      version: "2.0",
+      version: "3.0",
       exportedAt: new Date().toISOString(),
       userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "unknown",
+      timingResolutionMs: timingResMs,
       testDurationSec: parseFloat(((performance.now() - startRef.current) / 1000).toFixed(1)),
       analysis: {
         verdict: ds.classification.verdict,
         confidence: ds.classification.confidence,
         description: ds.classification.description,
-        eventRate: { avgHz: +ds.avgRate.toFixed(2), peakHz: +ds.peakRate.toFixed(2), minIntervalMs: ds.minInterval < Infinity ? +ds.minInterval.toFixed(3) : null },
+        keydownRate: {
+          avgHz: +ds.avgRate.toFixed(2),
+          rollingHz: +ds.rollingRate.toFixed(2),
+          peakHz: +ds.peakRate.toFixed(2),
+          minIntervalMs: ds.minInterval < Infinity ? +ds.minInterval.toFixed(3) : null,
+        },
         holdDuration: {
           minMs: ds.minHold < Infinity ? +ds.minHold.toFixed(3) : null,
           avgMs: +ds.avgHold.toFixed(2), stdDevMs: +ds.holdStdDev.toFixed(2),
@@ -802,14 +884,18 @@ export default function KeyboardTester() {
         },
         maxTapRateHz: +ds.maxTapRate.toFixed(1),
         microReleaseRatio: +ds.microRatio.toFixed(4),
-        nkroMax: ds.nkroMax, ghostEvents: ds.ghostEvents,
-        totalEvents: ds.totalEvents, totalKeydowns: ds.totalKeydowns, totalKeyups: ds.totalKeyups,
+        nkroMax: ds.nkroMax,
+        bounceEvents: ds.bounceEvents,
+        totalKeydowns: ds.totalKeydowns,
+        totalKeyups: ds.totalKeyups,
+        totalPhysicalEvents: ds.totalEvents,
         keysTestedCount: ds.testedCount,
         wpm: +ds.wpm.toFixed(1),
         signals: ds.classification.signals,
       },
       events: eventsRef.current.map(e => ({
-        elapsedMs: +e.elapsedMs.toFixed(3), type: e.type, key: e.key, code: e.code, repeat: e.repeat,
+        elapsedMs: +e.elapsedMs.toFixed(3), type: e.type, key: e.displayKey,
+        code: e.code, repeat: e.repeat,
         intervalMs: e.intervalMs !== null ? +e.intervalMs.toFixed(3) : null,
         holdMs: e.holdMs !== null ? +e.holdMs.toFixed(3) : null,
         reactivationMs: e.reactivationMs !== null ? +e.reactivationMs.toFixed(3) : null,
@@ -830,13 +916,15 @@ export default function KeyboardTester() {
   const ds = displayStats;
   const cl = ds.classification;
   const verdictColor = VERDICT_COLORS[cl.verdict] || "#888";
-  const rateColor = ds.avgRate > 30 ? "#00ff88" : ds.avgRate > 15 ? "#88ff00" : ds.avgRate > 5 ? "#c0c8d0" : "#5a6068";
+  const rateDisplay = ds.rollingRate > 0 ? ds.rollingRate : ds.avgRate;
+  const rateColor = rateDisplay > 30 ? "#00ff88" : rateDisplay > 15 ? "#88ff00" : rateDisplay > 5 ? "#c0c8d0" : "#5a6068";
   const captureStatusColor = isCaptureFocused ? "#22c55e" : "#71717a";
   const captureStatusText = isCaptureFocused
     ? (isRecording ? "Capture armed — type to begin testing" : "Focused but paused")
     : "Click inside to arm keyboard capture";
   const mono = "var(--font-mono, 'JetBrains Mono'), 'SF Mono', 'Fira Code', monospace";
   const fmtP = (v: number) => isNaN(v) ? EMPTY : v < Infinity ? v.toFixed(1) : EMPTY;
+  const timingWarn = timingResMs !== null && timingResMs > 2;
 
   const tabStyle = (t: string) => ({
     padding: "8px 18px", fontSize: 11, letterSpacing: 0.5, fontFamily: "inherit",
@@ -852,11 +940,10 @@ export default function KeyboardTester() {
     transition: "all 0.2s ease",
   });
 
-  // Test checklist state
   const testChecks = [
     { done: ds.totalEvents >= 50, label: "Basic typing (50+ events)" },
     { done: ds.maxSingleKeyPresses >= 30, label: "Single-key rapid tap (30+ on one key)" },
-    { done: ds.nkroMax >= 6, label: "Rollover test (press 6+ keys at once)" },
+    { done: ds.nkroMax >= 6, label: "Rollover test (6+ keys at once)" },
     { done: ds.testedCount >= 8, label: "Key diversity (8+ unique keys)" },
   ];
 
@@ -882,14 +969,21 @@ export default function KeyboardTester() {
         <div style={{ fontSize: 10, letterSpacing: 6, color: "#3f3f46", marginBottom: 4 }}>ADVANCED</div>
         <h1 style={{ fontSize: 26, fontWeight: 800, color: "#00ff88", letterSpacing: -0.5, margin: "4px 0 10px" }}>KEY DIAGNOSTICS</h1>
         <div style={{ display: "flex", gap: 16, justifyContent: "center", fontSize: 12, color: "#71717a", flexWrap: "wrap", alignItems: "center" }}>
-          <span>{ds.totalEvents} events</span>
           <span>{ds.totalKeydowns} presses</span>
+          <span>{ds.totalKeyups} releases</span>
           <span>{ds.testedCount} keys</span>
           {ds.wpm > 0 && <span>{ds.wpm.toFixed(0)} WPM</span>}
           <span style={{ color: isRecording ? "#00ff88" : "#ef4444", animation: isRecording ? "blink 1.5s infinite" : "none" }}>
             {isRecording ? "REC" : "PAUSED"}
           </span>
         </div>
+        {timingResMs !== null && (
+          <div style={{ marginTop: 4, fontSize: 9, color: timingWarn ? "#eab308" : "#3f3f46" }}>
+            {timingWarn
+              ? `⚠ Timer resolution: ~${timingResMs.toFixed(1)}ms — sub-5ms measurements may be imprecise`
+              : `Timer resolution: ~${timingResMs.toFixed(2)}ms`}
+          </div>
+        )}
         <div style={{ marginTop: 10 }}>
           <span style={{
             color: verdictColor, fontWeight: 600, fontSize: 12, letterSpacing: 0.5,
@@ -965,9 +1059,14 @@ export default function KeyboardTester() {
 
       {/* ── Top Stats ───────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, width: "100%", maxWidth: 820, marginBottom: 14 }}>
-        <Stat label="Event Rate" value={ds.avgRate > 0 ? `${ds.avgRate.toFixed(0)}Hz` : EMPTY} sub={`peak ${ds.peakRate > 0 ? ds.peakRate.toFixed(0) + "Hz" : EMPTY}`} color={rateColor} />
+        <Stat
+          label="Keydown Rate"
+          value={rateDisplay > 0 ? `${rateDisplay.toFixed(0)}Hz` : EMPTY}
+          sub={ds.avgRate > 0 ? `avg ${ds.avgRate.toFixed(0)}Hz` : "press keys to measure"}
+          color={rateColor}
+        />
         <Stat label="Min Interval" value={ds.minInterval < Infinity ? `${ds.minInterval.toFixed(2)}ms` : EMPTY} sub={`max ${ds.maxInterval > 0 ? ds.maxInterval.toFixed(1) + "ms" : EMPTY}`} color="#d4d4d8" />
-        <Stat label="Jitter" value={ds.jitter > 0 ? `+/-${ds.jitter.toFixed(2)}ms` : EMPTY} sub="std deviation" color={ds.jitter < 15 ? "#00ff88" : ds.jitter < 50 ? "#ffaa00" : "#ff5555"} />
+        <Stat label="Jitter" value={ds.jitter > 0 ? `±${ds.jitter.toFixed(2)}ms` : EMPTY} sub="std deviation" color={ds.jitter < 15 ? "#00ff88" : ds.jitter < 50 ? "#ffaa00" : "#ff5555"} />
         <Stat label="NKRO Max" value={ds.nkroMax || EMPTY} sub={`${ds.currentHeld} held now`} color="#d4d4d8" />
       </div>
 
@@ -991,7 +1090,7 @@ export default function KeyboardTester() {
             { label: "MICRO%", value: ds.totalKeyups > 0 ? `${(ds.microRatio * 100).toFixed(1)}` : EMPTY, sub: `<${MICRO_RELEASE_MS}ms`, color: ds.microRatio > 0.2 ? "#ff44cc" : ds.microRatio > 0.05 ? "#44aaff" : "#52525b" },
             { label: "TAP RATE", value: ds.maxTapRate > 0 ? ds.maxTapRate.toFixed(1) : EMPTY, sub: "taps/sec", color: ds.maxTapRate > 30 ? "#ff44cc" : ds.maxTapRate > 18 ? "#44aaff" : "#d4d4d8" },
             { label: "AVG HOLD", value: ds.avgHold > 0 ? ds.avgHold.toFixed(1) : EMPTY, sub: "ms", color: "#d4d4d8" },
-            { label: "GHOSTS", value: ds.ghostEvents, sub: "bounce", color: ds.ghostEvents > 3 ? "#ffaa44" : ds.ghostEvents > 0 ? "#ef4444" : "#52525b" },
+            { label: "BOUNCE", value: ds.bounceEvents, sub: "events", color: ds.bounceEvents > 3 ? "#ffaa44" : ds.bounceEvents > 0 ? "#ef4444" : "#52525b" },
           ].map((item, i) => (
             <div key={i} style={{ textAlign: "center", padding: "6px 0" }}>
               <div style={{ fontSize: 9, color: "#52525b", letterSpacing: 1, marginBottom: 4 }}>{item.label}</div>
@@ -1030,7 +1129,7 @@ export default function KeyboardTester() {
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 9, color: t.done ? "#00ff88" : "#27272a",
                 }}>
-                  {t.done ? "\u2713" : ""}
+                  {t.done ? "✓" : ""}
                 </span>
                 <span style={{ color: t.done ? "#a1a1aa" : "#52525b" }}>{t.label}</span>
               </div>
@@ -1074,10 +1173,10 @@ export default function KeyboardTester() {
                 return (
                   <React.Fragment key={i}>
                     <div style={{ color: "#52525b", padding: "3px 0" }}>{e.elapsed}s</div>
-                    <div style={{ color: isDown ? "#22c55e" : "#52525b", padding: "3px 0", fontWeight: 600 }}>
+                    <div style={{ color: e.repeat ? "#3f3f46" : isDown ? "#22c55e" : "#52525b", padding: "3px 0", fontWeight: 600 }}>
                       {e.type}{e.repeat ? "*" : ""}
                     </div>
-                    <div style={{ color: "#d4d4d8", padding: "3px 0", fontWeight: 600 }}>{e.key}</div>
+                    <div style={{ color: "#d4d4d8", padding: "3px 0", fontWeight: 600 }}>{e.displayKey}</div>
                     <div style={{ color: "#3f3f46", padding: "3px 0", fontSize: 9 }}>{e.code}</div>
                     <div style={{ color: "#71717a", padding: "3px 0", fontVariantNumeric: "tabular-nums" }}>
                       {e.interval !== EMPTY ? `${e.interval}ms` : EMPTY}
@@ -1099,12 +1198,13 @@ export default function KeyboardTester() {
             <div style={{ color: "#22c55e", fontSize: 10, letterSpacing: 2, marginBottom: 10, fontWeight: 600 }}>SYSTEM DIAGNOSTICS</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
               <div>
-                <div style={{ color: "#52525b", fontSize: 9, letterSpacing: 2, marginBottom: 6, fontWeight: 600 }}>EVENT TIMING</div>
-                <div>Avg event rate: <span style={{ color: rateColor, fontWeight: 700 }}>{ds.avgRate > 0 ? `${ds.avgRate.toFixed(2)} Hz` : EMPTY}</span></div>
-                <div>Peak event rate: <span style={{ color: "#d4d4d8", fontWeight: 600 }}>{ds.peakRate > 0 ? `${ds.peakRate.toFixed(2)} Hz` : EMPTY}</span></div>
+                <div style={{ color: "#52525b", fontSize: 9, letterSpacing: 2, marginBottom: 6, fontWeight: 600 }}>KEYDOWN RATE</div>
+                <div>Rolling (3s): <span style={{ color: rateColor, fontWeight: 700 }}>{ds.rollingRate > 0 ? `${ds.rollingRate.toFixed(2)} Hz` : EMPTY}</span></div>
+                <div>All-time avg: <span style={{ color: "#d4d4d8", fontWeight: 600 }}>{ds.avgRate > 0 ? `${ds.avgRate.toFixed(2)} Hz` : EMPTY}</span></div>
+                <div>Peak: <span style={{ color: "#d4d4d8" }}>{ds.peakRate > 0 ? `${ds.peakRate.toFixed(2)} Hz` : EMPTY}</span></div>
                 <div>Min interval: <span style={{ color: "#d4d4d8" }}>{ds.minInterval < Infinity ? `${ds.minInterval.toFixed(3)} ms` : EMPTY}</span></div>
-                <div>Jitter (sigma): <span style={{ color: ds.jitter < 15 ? "#22c55e" : "#eab308" }}>{ds.jitter > 0 ? `+/-${ds.jitter.toFixed(3)} ms` : EMPTY}</span></div>
-                <div>Total events: <span style={{ color: "#d4d4d8" }}>{ds.totalEvents}</span> <span style={{ color: "#52525b", fontSize: 9 }}>({ds.totalKeydowns} dn, {ds.totalKeyups} up)</span></div>
+                <div>Jitter (σ): <span style={{ color: ds.jitter < 15 ? "#22c55e" : "#eab308" }}>{ds.jitter > 0 ? `±${ds.jitter.toFixed(3)} ms` : EMPTY}</span></div>
+                <div>Presses: <span style={{ color: "#d4d4d8" }}>{ds.totalKeydowns}</span> &nbsp; Releases: <span style={{ color: "#d4d4d8" }}>{ds.totalKeyups}</span></div>
               </div>
               <div>
                 <div style={{ color: "#52525b", fontSize: 9, letterSpacing: 2, marginBottom: 6, fontWeight: 600 }}>HOLD DURATION DISTRIBUTION</div>
@@ -1130,7 +1230,7 @@ export default function KeyboardTester() {
                       );
                     })}
                     <div style={{ fontSize: 9, color: "#52525b", marginTop: 4 }}>
-                      sigma = {ds.holdStdDev > 0 ? ds.holdStdDev.toFixed(1) : EMPTY}ms &nbsp; avg = {ds.avgHold > 0 ? ds.avgHold.toFixed(1) : EMPTY}ms
+                      σ = {ds.holdStdDev > 0 ? ds.holdStdDev.toFixed(1) : EMPTY}ms &nbsp; avg = {ds.avgHold > 0 ? ds.avgHold.toFixed(1) : EMPTY}ms &nbsp; (holds &gt;{HOLD_CAP_MS}ms excluded)
                     </div>
                   </div>
                 ) : <div style={{ color: "#27272a", fontSize: 10 }}>Press and release keys to see distribution...</div>}
@@ -1148,27 +1248,27 @@ export default function KeyboardTester() {
               <div>
                 <div>Max tap rate: <span style={{ color: ds.maxTapRate > 30 ? "#ff44cc" : ds.maxTapRate > 18 ? "#44aaff" : "#d4d4d8", fontWeight: 600 }}>{ds.maxTapRate > 0 ? `${ds.maxTapRate.toFixed(1)} taps/sec` : EMPTY}</span></div>
                 <div>Micro-releases: <span style={{ color: ds.microReleases > 3 ? "#eab308" : "#d4d4d8" }}>{ds.microReleases}</span> <span style={{ color: "#52525b", fontSize: 9 }}>({(ds.microRatio * 100).toFixed(1)}%)</span></div>
-                <div>Ghost events: <span style={{ color: ds.ghostEvents > 0 ? "#ef4444" : "#d4d4d8" }}>{ds.ghostEvents}</span></div>
+                <div>Bounce events: <span style={{ color: ds.bounceEvents > 0 ? "#ef4444" : "#d4d4d8" }}>{ds.bounceEvents}</span></div>
               </div>
             </div>
             <div style={{ fontSize: 10, color: "#52525b", marginTop: 4, lineHeight: 1.6 }}>
-              Re-activation = time from releasing a key to pressing the same key again.
+              Re-activation = time from releasing a key to pressing the <em>same</em> key again (up→down gap, per physical key code).
             </div>
 
             {/* How to test */}
             <div style={{ marginTop: 16, color: "#52525b", fontSize: 9, letterSpacing: 2, marginBottom: 6, fontWeight: 600 }}>HOW TO TEST</div>
             <div style={{ fontSize: 10, color: "#71717a", lineHeight: 1.8 }}>
-              1. <span style={{ color: "#d4d4d8" }}>Rapid tap</span> — tap a single key as fast as possible for 10+ seconds<br />
-              2. <span style={{ color: "#d4d4d8" }}>Rollover</span> — press and hold 6+ keys simultaneously (both hands)<br />
-              3. <span style={{ color: "#d4d4d8" }}>Rapid trigger</span> — if your keyboard has RT, tap with minimal finger travel<br />
-              4. <span style={{ color: "#d4d4d8" }}>Export</span> — download the full report as JSON for offline analysis
+              1. <span style={{ color: "#d4d4d8" }}>Rapid tap</span> — tap a single key as fast as possible for 10+ seconds (unlocks re-activation signals)<br />
+              2. <span style={{ color: "#d4d4d8" }}>Rollover</span> — press and hold 6+ keys simultaneously with both hands (NKRO signal)<br />
+              3. <span style={{ color: "#d4d4d8" }}>Rapid trigger</span> — if your keyboard has RT enabled, tap with minimal finger travel<br />
+              4. <span style={{ color: "#d4d4d8" }}>Export</span> — download full JSON report with every event timestamped
             </div>
           </div>
         )}
 
         {tab === "intervals" && (
           <div>
-            <div style={{ color: "#22c55e", fontSize: 10, letterSpacing: 2, marginBottom: 10, fontWeight: 600 }}>KEYDOWN INTERVAL DISTRIBUTION</div>
+            <div style={{ color: "#22c55e", fontSize: 10, letterSpacing: 2, marginBottom: 10, fontWeight: 600 }}>KEYDOWN INTERVAL HISTORY</div>
             {ds.keydownIntervals.length > 0 ? (
               <React.Fragment>
                 <div style={{ display: "flex", alignItems: "flex-end", height: 200, gap: 1, padding: "0 6px" }}>
@@ -1182,15 +1282,15 @@ export default function KeyboardTester() {
                         <div key={i} style={{
                           flex: 1, minWidth: 2, maxWidth: 8, height: h, background: color,
                           borderRadius: "2px 2px 0 0", opacity: 0.85,
-                        }} title={`${v.toFixed(3)}ms (${rate.toFixed(0)}Hz)`} />
+                        }} title={`${v.toFixed(2)}ms (${rate.toFixed(0)}Hz)`} />
                       );
                     });
                   })()}
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#52525b", marginTop: 6, padding: "0 6px" }}>
-                  <span>{"<- older"}</span>
-                  <span>Last 100 keydown intervals — shorter bars = faster</span>
-                  <span>{"newer ->"}</span>
+                  <span>← older</span>
+                  <span>Last 100 keydown intervals — taller bar = slower keystroke</span>
+                  <span>newer →</span>
                 </div>
                 <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 10, fontSize: 9 }}>
                   {[
@@ -1207,7 +1307,7 @@ export default function KeyboardTester() {
                 </div>
               </React.Fragment>
             ) : (
-              <div style={{ textAlign: "center", color: "#27272a", marginTop: 80, fontSize: 12 }}>Press keys to see interval histogram...</div>
+              <div style={{ textAlign: "center", color: "#27272a", marginTop: 80, fontSize: 12 }}>Press keys to see interval history...</div>
             )}
           </div>
         )}
@@ -1215,7 +1315,9 @@ export default function KeyboardTester() {
 
       {/* ── Disclaimer ──────────────────────────────────────── */}
       <div style={{ marginTop: 10, fontSize: 9, color: "#27272a", textAlign: "center", maxWidth: 820, lineHeight: 1.6 }}>
-        Browser timing resolution ~1-4ms. Classification uses behavioral heuristics, not hardware access. All processing happens in your browser — no data is collected, transmitted, or stored.
+        All tracking uses physical key codes (e.code), not display characters — Left/Right modifiers and Numpad keys are measured separately.
+        Browser timer resolution: ~{timingResMs !== null ? timingResMs.toFixed(2) : "?"}ms. Classification uses behavioral heuristics, not hardware access.
+        No data is collected, transmitted, or stored.
       </div>
     </div>
   );
